@@ -1,0 +1,29 @@
+# Caddy dev config — HTTP only on localhost (no TLS, no ACME)
+{
+  admin off
+  auto_https off
+}
+
+:80 {
+  # API — routes are at /api/v1/*, forward as-is
+  handle /api/* {
+    reverse_proxy api:8000
+  }
+
+  # AI service — routes are at /livez, /chat, etc. Strip /ai prefix.
+  handle /ai/* {
+    uri strip_prefix /ai
+    reverse_proxy ai:8001
+  }
+
+  # MCP server — routes are at /livez, /mcp/tools, etc. Strip /mcp prefix.
+  handle /mcp/* {
+    uri strip_prefix /mcp
+    reverse_proxy mcp:8002
+  }
+
+  # Web SPA — everything else
+  handle {
+    reverse_proxy web:8080
+  }
+}

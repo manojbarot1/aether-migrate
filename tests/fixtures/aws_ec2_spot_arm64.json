@@ -1,0 +1,54 @@
+{
+  "InstanceId": "i-0spot1234567890ab",
+  "InstanceType": "c5.large",
+  "ImageId": "ami-0spot123",
+  "Architecture": "arm64",
+  "VirtualizationType": "hvm",
+  "Hypervisor": "nitro",
+  "Platform": "",
+  "PlatformDetails": "Linux/UNIX",
+  "BootMode": "uefi",
+  "RootDeviceType": "instance-store",
+  "RootDeviceName": "/dev/sda1",
+  "InstanceLifecycle": "spot",
+  "State": {
+    "Code": 80,
+    "Name": "stopped"
+  },
+  "Placement": {
+    "AvailabilityZone": "eu-west-1b",
+    "GroupName": "",
+    "Tenancy": "dedicated"
+  },
+  "CpuOptions": {
+    "CoreCount": 1,
+    "ThreadsPerCore": 2
+  },
+  "Tags": [
+    { "Key": "Name", "Value": "spot-worker" }
+  ],
+  "BlockDeviceMappings": [],
+  "NetworkInterfaces": [
+    {
+      "NetworkInterfaceId": "eni-0spot123",
+      "SubnetId": "subnet-0spot123",
+      "VpcId": "vpc-0spot123",
+      "PrivateIpAddress": "192.168.1.50",
+      "SourceDestCheck": false,
+      "PrivateIpAddresses": [
+        {
+          "PrivateIpAddress": "192.168.1.50",
+          "Primary": true
+        }
+      ],
+      "Groups": [
+        { "GroupId": "sg-0spot123", "GroupName": "spot-sg" }
+      ],
+      "Association": {}
+    }
+  ],
+  "IamInstanceProfile": null,
+  "LaunchTime": "2024-03-01T12:00:00Z",
+  "EbsOptimized": false,
+  "EnaSupport": true
+}

@@ -1,0 +1,23 @@
+[project]
+name = "aether-providers-gcp"
+version = "0.1.0"
+description = "AETHER MIGRATE — GCP provider adapter (Phase 2c implementation)"
+requires-python = ">=3.12"
+dependencies = [
+  "aether-core",
+  "aether-providers-base",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+aether-core = { workspace = true }
+aether-providers-base = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gcp_adapter"]

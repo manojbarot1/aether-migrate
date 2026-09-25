@@ -1,0 +1,318 @@
+# AETHER MIGRATE — Base Docker Compose file
+# Use with an override: docker compose -f compose.yaml -f compose.dev.yaml up
+# or:                   docker compose -f compose.yaml -f compose.prod.yaml up
+#
+# Third-party images used here have no Red Hat equivalent.
+# See SECURITY.md §Container Images for the approved exception list.
+
+name: aether
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Edge / reverse proxy
+  # NOTE: Caddy 2 has no Red Hat registry equivalent — official image used.
+  # ---------------------------------------------------------------------------
+  edge:
+    image: caddy:2-alpine
+    <<: *default-restart
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app
+    logging: *default-logging
+    depends_on:
+      - web
+      - api
+      - ai
+      - mcp
+
+  # ---------------------------------------------------------------------------
+  # Web SPA
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ../
+      dockerfile: docker/web.Dockerfile
+    <<: *default-restart
+    networks:
+      - app
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ../
+      dockerfile: docker/api.Dockerfile
+    <<: *default-restart
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - OIDC_ISSUER=http://keycloak:8080/realms/aether
+      - OIDC_JWKS_URL=http://keycloak:8080/realms/aether/protocol/openid-connect/certs
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-aether-api}
+      - OPENBAO_ADDR=http://openbao:8200
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app
+      - data
+      - secrets
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      openbao:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # AI model gateway
+  # ---------------------------------------------------------------------------
+  ai:
+    build:
+      context: ../
+      dockerfile: docker/ai.Dockerfile
+    <<: *default-restart
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    networks:
+      - app
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # MCP server
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: ../
+      dockerfile: docker/mcp.Dockerfile
+    <<: *default-restart
+    networks:
+      - app
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # Domain worker (sizing, cost, assessment, planner)
+  # ---------------------------------------------------------------------------
+  worker_domain:
+    build:
+      context: ../
+      dockerfile: docker/worker.Dockerfile
+    command: ["python3.12", "-m", "worker_domain.main"]
+    <<: *default-restart
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
+    networks:
+      - app
+      - data
+    logging: *default-logging
+    depends_on:
+      - temporal
+      - postgres
+
+  # ---------------------------------------------------------------------------
+  # Connector worker (discovery, provider adapters)
+  # ---------------------------------------------------------------------------
+  worker_connector:
+    build:
+      context: ../
+      dockerfile: docker/worker.Dockerfile
+    command: ["python3.12", "-m", "worker_connector.main"]
+    <<: *default-restart
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
+      - OPENBAO_ADDR=http://openbao:8200
+    networks:
+      - app
+      - data
+      - secrets
+    logging: *default-logging
+    depends_on:
+      - temporal
+      - postgres
+      - openbao
+
+  # ---------------------------------------------------------------------------
+  # Temporal workflow engine
+  # NOTE: No Red Hat registry equivalent — official temporalio image used.
+  # ---------------------------------------------------------------------------
+  temporal:
+    image: temporalio/server:latest
+    <<: *default-restart
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=aether
+      - POSTGRES_PWD=${POSTGRES_PASSWORD}
+      - POSTGRES_SEEDS=postgres
+    networks:
+      - app
+      - data
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    <<: *default-restart
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost
+    networks:
+      - app
+    logging: *default-logging
+    depends_on:
+      - temporal
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # NOTE: No Red Hat registry equivalent for Alpine variant — official postgres used.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    <<: *default-restart
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-aether}
+      - POSTGRES_USER=${POSTGRES_USER:-aether}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aether} -d ${POSTGRES_DB:-aether}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis (using Valkey — open-source Redis fork)
+  # NOTE: No Red Hat registry equivalent — official valkey image used.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: valkey/valkey:8.0-alpine
+    <<: *default-restart
+    volumes:
+      - redis_data:/data
+    networks:
+      - data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # OpenBao (open-source Vault fork)
+  # NOTE: No Red Hat registry equivalent — official openbao image used.
+  # ---------------------------------------------------------------------------
+  openbao:
+    image: openbao/openbao:2.1
+    <<: *default-restart
+    cap_add:
+      - IPC_LOCK
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=${OPENBAO_ROOT_TOKEN:-changeme-replace-in-bootstrap}
+      - BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    networks:
+      - secrets
+    logging: *default-logging
+    volumes:
+      - openbao_data:/openbao/data
+
+  # ---------------------------------------------------------------------------
+  # Keycloak (identity provider)
+  # NOTE: No Red Hat registry equivalent for Keycloak distribution — quay.io image used.
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    <<: *default-restart
+    command: ["start-dev", "--import-realm"]
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-aether}
+      - KC_DB_USERNAME=${POSTGRES_USER:-aether}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - ./config/keycloak:/opt/keycloak/data/import:ro
+    networks:
+      - app
+      - data
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Object store (Garage — S3-compatible, self-hosted)
+  # NOTE: No Red Hat registry equivalent — ghcr.io official image used.
+  # ---------------------------------------------------------------------------
+  objstore:
+    image: chrislusf/seaweedfs:latest
+    <<: *default-restart
+    command: server -s3 -s3.port=8333
+    volumes:
+      - objstore_data:/data
+    networks:
+      - data
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # DB migration runner (one-shot)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ../
+      dockerfile: docker/api.Dockerfile
+    command: ["python", "-m", "alembic", "-c", "/opt/packages/db/src/db/migrations/alembic.ini", "upgrade", "head"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - migrate
+
+networks:
+  app: {}
+  data:
+    internal: true
+  secrets:
+    internal: true
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+  postgres_data: {}
+  redis_data: {}
+  openbao_data: {}
+  objstore_data: {}

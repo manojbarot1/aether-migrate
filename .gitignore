@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv
+.venv/
+.uv/
+# uv.lock is intentionally committed (dependency lockfile)
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# mypy / ruff
+.mypy_cache/
+.ruff_cache/
+
+# Node.js / web
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.env
+apps/web/.env.local
+
+# Environment files — NEVER commit .env (contains real secrets)
+.env
+.env.local
+.env.*.local
+
+# OpenBao unseal keys — HIGHLY SENSITIVE, store offline
+.bao-unseal-keys
+
+# Backups
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temp files
+*.bak
+*.orig

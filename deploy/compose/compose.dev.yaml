@@ -1,0 +1,157 @@
+# AETHER MIGRATE — Development overrides
+# Usage: docker compose -f compose.yaml -f compose.dev.yaml up
+#
+# Differences from base:
+# - All Python/Node builds use public images (python:3.12-slim, node:20-alpine, nginx:1.27-alpine)
+#   instead of registry.redhat.io (which requires a subscription to pull).
+# - OpenBao runs in dev mode (auto-unsealed, in-memory — data lost on restart, fine for dev).
+# - Caddy uses HTTP-only on localhost (no ACME needed).
+# - Temporal UI and Keycloak ports are exposed directly.
+# - Hot-reload volumes for API.
+# - Migrate service uses the dev Dockerfile.
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Edge — HTTP only in dev (no TLS cert needed for localhost)
+  # ---------------------------------------------------------------------------
+  edge:
+    volumes:
+      - ../config/caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+
+  # ---------------------------------------------------------------------------
+  # Web — dev build uses public images
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ../../
+      dockerfile: docker/web.dev.Dockerfile
+
+  # ---------------------------------------------------------------------------
+  # API — dev build + hot reload
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ../../
+      dockerfile: docker/api.dev.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - OIDC_ISSUER=http://keycloak:8080/realms/aether
+      - OIDC_JWKS_URL=http://keycloak:8080/realms/aether/protocol/openid-connect/certs
+      - OIDC_CLIENT_ID=aether-api
+      - OPENBAO_ADDR=http://openbao:8200
+      - OPENBAO_TOKEN=${OPENBAO_ROOT_TOKEN:-devroot}
+      - LOG_LEVEL=debug
+      - DEV_MODE=true
+    command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # ---------------------------------------------------------------------------
+  # AI — dev build
+  # ---------------------------------------------------------------------------
+  ai:
+    build:
+      context: ../../
+      dockerfile: docker/ai.dev.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+      - OIDC_JWKS_URL=http://keycloak:8080/realms/aether/protocol/openid-connect/certs
+      - OPENBAO_ADDR=http://openbao:8200
+      - OPENBAO_TOKEN=${OPENBAO_ROOT_TOKEN:-devroot}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LOG_LEVEL=debug
+    command: ["python", "-m", "uvicorn", "ai.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+
+  # ---------------------------------------------------------------------------
+  # MCP — dev build
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: ../../
+      dockerfile: docker/mcp.dev.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+      - OIDC_JWKS_URL=http://keycloak:8080/realms/aether/protocol/openid-connect/certs
+      - LOG_LEVEL=debug
+    command: ["python", "-m", "uvicorn", "mcp_server.main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]
+
+  # ---------------------------------------------------------------------------
+  # Workers — dev builds
+  # ---------------------------------------------------------------------------
+  worker_domain:
+    build:
+      context: ../../
+      dockerfile: docker/worker.dev.Dockerfile
+    command: ["python", "-m", "worker_domain.main"]
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+      - OPENBAO_ADDR=http://openbao:8200
+      - OPENBAO_TOKEN=${OPENBAO_ROOT_TOKEN:-devroot}
+      - LOG_LEVEL=debug
+
+  worker_connector:
+    build:
+      context: ../../
+      dockerfile: docker/worker.dev.Dockerfile
+    command: ["python", "-m", "worker_connector.main"]
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+      - OPENBAO_ADDR=http://openbao:8200
+      - OPENBAO_TOKEN=${OPENBAO_ROOT_TOKEN:-devroot}
+      - LOG_LEVEL=debug
+
+  # ---------------------------------------------------------------------------
+  # Migrate — dev build (one-shot, run manually: make migrate)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ../../
+      dockerfile: docker/api.dev.Dockerfile
+    command: ["python", "-m", "alembic", "-c", "/opt/packages/db/src/db/migrations/alembic.ini", "upgrade", "head"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/aether
+
+  # ---------------------------------------------------------------------------
+  # OpenBao — dev mode (auto-unsealed, in-memory, root token = "devroot")
+  # WARNING: data is NOT persisted. Use only for local development.
+  # ---------------------------------------------------------------------------
+  openbao:
+    command: ["bao", "server", "-dev", "-dev-root-token-id=devroot", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=devroot
+      - BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    ports:
+      - "8200:8200"
+
+  # ---------------------------------------------------------------------------
+  # Expose Temporal UI and Keycloak directly in dev
+  # ---------------------------------------------------------------------------
+  temporal-ui:
+    ports:
+      - "8088:8080"
+
+  keycloak:
+    ports:
+      - "8081:8080"
+
+  # ---------------------------------------------------------------------------
+  # Postgres — expose port in dev for direct access (e.g. psql, DBeaver)
+  # ---------------------------------------------------------------------------
+  postgres:
+    environment:
+      - POSTGRES_DB=aether
+      - POSTGRES_USER=aether
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
+    ports:
+      - "5432:5432"

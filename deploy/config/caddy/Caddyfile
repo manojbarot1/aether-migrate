@@ -1,0 +1,37 @@
+{
+  admin off
+}
+
+{$DOMAIN:localhost} {
+  # TLS — Caddy automatically provisions and renews certificates
+  # For localhost, a self-signed cert is used; set DOMAIN for production
+
+  # API
+  reverse_proxy /api/* api:8000
+
+  # AI model gateway
+  reverse_proxy /ai/* ai:8001
+
+  # MCP server
+  reverse_proxy /mcp/* mcp:8002
+
+  # Web SPA — catch-all
+  handle /* {
+    reverse_proxy web:8080
+  }
+
+  # Security headers
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Frame-Options "DENY"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    -Server
+  }
+
+  # Access log to stdout
+  log {
+    output stdout
+    format json
+  }
+}

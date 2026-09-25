@@ -1,0 +1,114 @@
+# AETHER MIGRATE — Production hardening overrides
+# Usage: docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# REPLACE all `# REPLACE: pin digest` comments with @sha256:... before deploying.
+# Generate with: docker buildx imagetools inspect <image>:<tag>
+
+services:
+
+  edge:
+    image: caddy:2.9-alpine  # REPLACE: pin digest
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 100
+
+  web:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 128m
+    cpus: "0.25"
+    pids_limit: 50
+
+  api:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 200
+
+  ai:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 1g
+    cpus: "2.0"
+    pids_limit: 200
+
+  mcp:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 100
+
+  worker_domain:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 100
+
+  worker_connector:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    restart: always
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 100
+
+  postgres:
+    restart: always
+    mem_limit: 2g
+    cpus: "2.0"
+
+  temporal:
+    restart: always
+    mem_limit: 1g
+    cpus: "1.0"
+
+  keycloak:
+    command: ["start", "--import-realm", "--optimized"]
+    restart: always
+    mem_limit: 1g
+    cpus: "1.0"
+
+  openbao:
+    # Production OpenBao: HA mode, not dev mode — configure separately
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=  # REPLACE: remove dev token in production
+    restart: always
+    mem_limit: 256m
+    cpus: "0.5"
+
+  redis:
+    restart: always
+    mem_limit: 256m
+    cpus: "0.5"

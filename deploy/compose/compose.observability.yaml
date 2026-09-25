@@ -1,0 +1,56 @@
+# AETHER MIGRATE — Observability stack
+# Usage: docker compose -f compose.yaml -f compose.observability.yaml up
+#
+# NOTE: Prometheus, Grafana, Loki, and otel-collector have no Red Hat registry
+# equivalents — official images are used per the approved exception list.
+
+services:
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.0
+    restart: unless-stopped
+    command: ["--config=/etc/otel/otel-collector.yaml"]
+    volumes:
+      - ../config/otel/otel-collector.yaml:/etc/otel/otel-collector.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - app
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    volumes:
+      - ../config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - app
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - app
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    volumes:
+      - loki_data:/loki
+    networks:
+      - app
+
+volumes:
+  prometheus_data: {}
+  grafana_data: {}
+  loki_data: {}

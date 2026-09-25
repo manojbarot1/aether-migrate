@@ -1,0 +1,37 @@
+[project]
+name = "aether-worker-connector"
+version = "0.1.0"
+description = "AETHER MIGRATE — Temporal connector worker (provider adapters, discovery)"
+requires-python = ">=3.12"
+dependencies = [
+  "temporalio>=1.9.0",
+  "structlog>=24.4.0",
+  "aether-core",
+  "aether-secrets",
+  "aether-providers-base",
+  "aether-providers-aws",
+  "aether-providers-azure",
+  "aether-providers-gcp",
+  "aether-providers-ibm",
+  "aether-db",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+aether-core = { workspace = true }
+aether-secrets = { workspace = true }
+aether-providers-base = { workspace = true }
+aether-providers-aws = { workspace = true }
+aether-providers-azure = { workspace = true }
+aether-providers-gcp = { workspace = true }
+aether-providers-ibm = { workspace = true }
+aether-db = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/worker_connector"]

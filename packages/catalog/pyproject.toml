@@ -1,0 +1,26 @@
+[project]
+name = "aether-catalog"
+version = "0.1.0"
+description = "AETHER MIGRATE — instance type / pricing catalog (Phase 5 implementation)"
+requires-python = ">=3.12"
+dependencies = [
+  "aether-core",
+  "aether-db",
+  "httpx>=0.27.0",
+  "structlog>=24.4.0",
+  "temporalio>=1.7.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+aether-core = { workspace = true }
+aether-db = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/catalog"]
