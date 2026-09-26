@@ -1,5 +1,6 @@
 import type { UserManager } from "oidc-client-ts";
 import type {
+  AssessmentRun,
   AuditPage,
   CatalogStatus,
   CompareResult,
@@ -96,6 +97,13 @@ export function createApi(manager: UserManager) {
     catalogStatus: () => request<CatalogStatus>("GET", "/api/v1/catalog/status"),
     catalogSync: () => request<{ workflow_id: string }>("POST", "/api/v1/catalog/sync"),
     compare: (wsId: string, body: Json) => request<CompareResult>("POST", `${ws(wsId)}/compare`, body),
+
+    assess: (wsId: string, body: Json) => request<AssessmentRun>("POST", `${ws(wsId)}/assessments`, body),
+    assessments: (wsId: string) => request<AssessmentRun[]>("GET", `${ws(wsId)}/assessments`),
+    assessment: (wsId: string, id: string) => request<AssessmentRun>("GET", `${ws(wsId)}/assessments/${id}`),
+    acknowledge: (wsId: string, body: Json) => request<void>("PUT", `${ws(wsId)}/acknowledgements`, body),
+    revokeAck: (wsId: string, nativeId: string, ruleId: string) =>
+      request<void>("DELETE", `${ws(wsId)}/acknowledgements?native_id=${encodeURIComponent(nativeId)}&rule_id=${ruleId}`),
 
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {
       const q = new URLSearchParams();

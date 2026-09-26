@@ -360,3 +360,89 @@ async def test_compare_sizes_and_prices_discovered_vms(
 
     status = (await client.get("/api/v1/catalog/status", headers=viewer)).json()
     assert any(x["region"] == region for x in status["azure"])
+
+
+async def test_assessment_run_and_acknowledgement(
+    app: FastAPI, client: httpx.AsyncClient, workspace: dict[str, Any], bao: FakeBao, aws: dict[str, Any]
+) -> None:
+    from aether.catalog.azure import curated_specs
+    from aether.catalog.store import upsert_prices, upsert_specs
+    from aether.core.catalog import Price, PriceModel
+    from aether.db.session import session_scope
+
+    from .conftest import ADMIN
+
+    async with session_scope() as s:
+        await upsert_specs(s, curated_specs())
+        await upsert_prices(
+            s,
+            [
+                Price(
+                    provider="azure",
+                    region="northeurope",
+                    sku=sku,
+                    os="linux",
+                    model=PriceModel.ON_DEMAND,
+                    hourly_usd=h,
+                    source="test",
+                )
+                for sku, h in (("Standard_E8s_v5", 0.5), ("Standard_F2s_v2", 0.09))
+            ],
+            None,
+        )
+
+    app.state.temporal = _InlineDiscovery(ConnectorActivities(bao))
+    ws = workspace["id"]
+    conn = (
+        await client.post(
+            f"/api/v1/workspaces/{ws}/connections",
+            json={
+                "name": "asmt",
+                "provider": "aws",
+                "config": {"auth_method": "aws_access_key", "regions": [REGION], "home_region": REGION},
+                "secret": {
+                    "access_key_id": aws["key"]["AccessKeyId"],
+                    "secret_access_key": aws["key"]["SecretAccessKey"],
+                },
+            },
+            headers=ADMIN,
+        )
+    ).json()
+    await client.post(f"/api/v1/workspaces/{ws}/connections/{conn['id']}/discover", headers=ADMIN)
+    vms = (await client.get(f"/api/v1/workspaces/{ws}/inventory/resources", headers=ADMIN)).json()["items"]
+    body = {"resource_ids": [v["id"] for v in vms], "target_region": "northeurope"}
+
+    r = await client.post(f"/api/v1/workspaces/{ws}/assessments", json=body, headers=ADMIN)
+    assert r.status_code == 201, r.text
+    run = r.json()
+    assert run["summary"]["vms"] == 4
+    assert sum(run["summary"]["readiness"].values()) == 4
+    assert run["summary"]["quota_needs"]  # aggregated vCPU per family
+    big = next(i for i in run["items"] if i["native_id"] == aws["big"])
+    assert big["target_sku"] == "Standard_E8s_v5"
+    rules = {f["rule_id"] for f in big["findings"]}
+    assert {"DRV-001", "NET-001"} <= rules
+
+    # Acknowledge a warning; it is applied on the next run and audited.
+    ack = {"native_id": aws["big"], "rule_id": "DRV-001", "reason": "Hyper-V modules verified in initramfs"}
+    assert (
+        await client.put(f"/api/v1/workspaces/{ws}/acknowledgements", json=ack, headers=ADMIN)
+    ).status_code == 204
+    again = (await client.post(f"/api/v1/workspaces/{ws}/assessments", json=body, headers=ADMIN)).json()
+    big2 = next(i for i in again["items"] if i["native_id"] == aws["big"])
+    drv = next(f for f in big2["findings"] if f["rule_id"] == "DRV-001")
+    assert drv["acknowledged"] is True
+    assert drv["acknowledgement"]["reason"].startswith("Hyper-V")
+    assert big2["score"] > big["score"]
+
+    listing = (await client.get(f"/api/v1/workspaces/{ws}/assessments", headers=ADMIN)).json()
+    assert listing[0]["id"] == again["id"]
+    assert listing[0]["items"] is None  # list is summary-only
+    bad = await client.put(
+        f"/api/v1/workspaces/{ws}/acknowledgements", json={**ack, "rule_id": "XX-999"}, headers=ADMIN
+    )
+    assert bad.status_code == 422
+    audit = (
+        await client.get(f"/api/v1/workspaces/{ws}/audit", params={"action": "assessment."}, headers=ADMIN)
+    ).json()["items"]
+    assert {e["action"] for e in audit} >= {"assessment.run", "assessment.acknowledge"}

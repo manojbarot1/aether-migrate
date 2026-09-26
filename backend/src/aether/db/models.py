@@ -254,3 +254,38 @@ class FxRateRow(Base):
     rate_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[str] = mapped_column(String(128))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# --------------------------------------------------------------------------- assessment
+
+
+class AssessmentRun(Base):
+    __tablename__ = "assessment_runs"
+    __table_args__ = (Index("ix_assessment_runs_ws_created", "workspace_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="RESTRICT"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    target_provider: Mapped[str] = mapped_column(String(16))
+    target_region: Mapped[str] = mapped_column(String(64))
+    strategy: Mapped[str] = mapped_column(String(32))
+    ruleset_version: Mapped[str] = mapped_column(String(32))
+    summary: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+
+
+class FindingAcknowledgement(Base):
+    """A reviewed, accepted warning. Keyed by the provider's native id so it survives new snapshots."""
+
+    __tablename__ = "finding_acknowledgements"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    native_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    rule_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    reason: Mapped[str] = mapped_column(Text)
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    acknowledged_by_display: Mapped[str | None] = mapped_column(String(320))
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

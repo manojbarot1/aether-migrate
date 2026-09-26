@@ -8,7 +8,7 @@ date: "2026-09-24"
 
 | | |
 |---|---|
-| **Status** | In implementation — Phases 0, 1, 2a, 4, 5 complete (2026-09-26); see §0.3 |
+| **Status** | In implementation — Phases 0, 1, 2a, 4, 5, 6 complete (2026-09-26); see §0.3 |
 | **Version** | 2.0 (supersedes v1 from `AETHER_MIGRATE_Project_Plan.docx`) |
 | **Date** | 2026-09-24 |
 | **Deployment target** | Docker only (Docker Compose v2, single host for v1; images ready for multi-node later) |
@@ -66,8 +66,9 @@ v1 falls short of "production grade" in five areas:
 | 2a — AWS discovery | **done** | Temporal region fan-out with per-family coverage; pure normalizer (VM/disk/NIC/VPC/subnet/SG rules/ALB+targets, OS/licence/boot inference with provenance); snapshots with RLS; inventory search + detail + graph neighbours; demo AWS simulator overlay |
 | 4 — Topology | **done** | VPC → subnet → VM graph (React Flow + ELK), LB routes, SG references, Mermaid export |
 | 5 — Catalog, sizing & cost | **done** | Daily Temporal-scheduled sync: Azure Retail Prices (on-demand, 1y/3y reservations, Windows uplift, Premium/Standard SSD tiers) for 6 regions, ECB FX; AWS source prices via Price List API during discovery; curated Azure size specs (labelled); pure sizing (like-for-like, cheapest-fit, right-sized with honest fallback) and cost engines with explicit assumptions; compare API + UI |
-| 6 — Assessment | next | Rules engine (port and test v0.1.0 rule ideas) |
-| 3, 7 | planned | See §24 |
+| 6 — Assessment | **done** | 19 rules (OS support/EOL, Amazon Linux portability, arm64, boot mode/size, Hyper-V drivers, ephemeral/oversized/high-IOPS/KMS disks, IP change, SG→ASG translation, open admin ports, instance roles, licensing, LB dependencies, tenancy, GPU, no-size), readiness scoring, per-family quota needs, audited acknowledgements that persist across snapshots |
+| 7 — Planner + IaC | next | Versioned, hashed plans; OpenTofu for Azure; approvals |
+| 3 — Assistant | planned | Typed tools over the same APIs |
 
 v0.1.0 (an earlier autonomous build) was reviewed and its foundation replaced; see [`REVIEW-v0.1.0.md`](REVIEW-v0.1.0.md).
 

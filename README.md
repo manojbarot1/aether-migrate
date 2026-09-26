@@ -2,10 +2,10 @@
 
 A self-hosted, cloud-neutral migration control plane. It lets engineers discover, understand, cost and plan workload moves across **AWS, Azure, Google Cloud and IBM Cloud**. Every number is traceable to data, and every action is traceable to a person.
 
-> **Status: v0.3 (Phases 0, 1, 2a, 4, 5).**
+> **Status: v0.4 (Phases 0, 1, 2a, 4, 5, 6).**
 >
-> - **Works today:** connect AWS accounts read-only, with least-privilege, audited, isolated credentials. Discover VMs, disks, networks, security groups and load balancers across regions, with coverage reporting. Search the normalized inventory and inspect any resource with its relationships. Visualise network topology. Size and price VMs on Azure from live list prices (1y/3y reservations, disks, one-time migration costs, any currency).
-> - **Next:** assessment and planning follow the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24.
+> - **Works today:** connect AWS accounts read-only, with least-privilege, audited, isolated credentials. Discover VMs, disks, networks, security groups and load balancers across regions, with coverage reporting. Search the normalized inventory and inspect any resource with its relationships. Visualise network topology. Size and price VMs on Azure from live list prices (1y/3y reservations, disks, one-time migration costs, any currency). Assess migration readiness with explainable rules.
+> - **Next:** migration planning with OpenTofu output, then the AI assistant, follow the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24.
 >
 > **No cloud resource is ever modified by this release.**
 

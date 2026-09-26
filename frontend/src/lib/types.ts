@@ -257,3 +257,47 @@ export interface CatalogStatus {
   aws: { region: string; prices: number; oldest_price_at: string }[];
   syncs: { id: string; provider: string; status: string; started_at: string; finished_at: string | null }[];
 }
+
+export type Severity = "blocker" | "warning" | "info";
+export type ReadinessState = "ready" | "ready_with_changes" | "blocked";
+
+export interface Finding {
+  rule_id: string;
+  rule_version: number;
+  severity: Severity;
+  category: string;
+  title: string;
+  message: string;
+  evidence: Record<string, unknown>;
+  remediation: string;
+  acknowledged: boolean;
+  acknowledgement: { reason: string; by: string | null; at: string } | null;
+}
+
+export interface AssessedVm {
+  resource_id: string;
+  native_id: string;
+  name: string | null;
+  readiness: ReadinessState;
+  score: number;
+  findings: Finding[];
+  target_sku: string | null;
+  target_family: string | null;
+}
+
+export interface AssessmentRun {
+  id: string;
+  created_at: string;
+  target_provider: string;
+  target_region: string;
+  strategy: string;
+  ruleset_version: string;
+  summary: {
+    vms: number;
+    readiness: Record<ReadinessState, number>;
+    average_score: number;
+    top_issues: [string, number][];
+    quota_needs: { family: string; vcpu: number }[];
+  };
+  items: AssessedVm[] | null;
+}

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Calculator, Server } from "lucide-react";
+import { ArrowDown, ArrowUp, Calculator, ClipboardCheck, Server } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Badge, Button, Card, EmptyState, ErrorBanner, Input, LinkButton, PageHeader, Select, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
@@ -177,9 +177,14 @@ export function Inventory() {
             </Button>
             <span className="ml-auto self-center text-sm text-[var(--muted)]">{total} VM{total === 1 ? "" : "s"}</span>
             {selected.size > 0 && (
-              <LinkButton variant="primary" to={`../compare?ids=${[...selected].join(",")}`} relative="path">
-                <Calculator className="size-4" /> Compare {selected.size} to Azure
-              </LinkButton>
+              <>
+                <LinkButton to={`../assessment?ids=${[...selected].join(",")}`} relative="path">
+                  <ClipboardCheck className="size-4" /> Assess {selected.size}
+                </LinkButton>
+                <LinkButton variant="primary" to={`../compare?ids=${[...selected].join(",")}`} relative="path">
+                  <Calculator className="size-4" /> Compare {selected.size} to Azure
+                </LinkButton>
+              </>
             )}
           </div>
         </form>
