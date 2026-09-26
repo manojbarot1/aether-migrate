@@ -11,6 +11,7 @@ import type {
   ResourcePage,
   Role,
   Snapshot,
+  TopologyView,
   Workspace,
 } from "./types";
 
@@ -86,6 +87,8 @@ export function createApi(manager: UserManager) {
       for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") q.set(k, String(v));
       return request<ResourcePage>("GET", `${ws(wsId)}/inventory/resources?${q.toString()}`);
     },
+    topology: (wsId: string, networkId: string, securityGroups: boolean) =>
+      request<TopologyView>("GET", `${ws(wsId)}/inventory/topology/${networkId}?security_groups=${securityGroups}`),
     resource: (wsId: string, id: string) => request<ResourceDetail>("GET", `${ws(wsId)}/inventory/resources/${id}`),
 
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {

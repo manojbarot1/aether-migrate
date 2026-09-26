@@ -197,3 +197,48 @@ async def test_other_workspace_cannot_see_inventory(
     assert (await client.get(f"/api/v1/workspaces/{other['id']}/inventory/resources", headers=member)).json()[
         "total"
     ] == 0
+
+
+async def test_topology_of_discovered_network(
+    app: FastAPI, client: httpx.AsyncClient, workspace: dict[str, Any], bao: FakeBao, aws: dict[str, Any]
+) -> None:
+    from .conftest import ADMIN
+
+    app.state.temporal = _InlineDiscovery(ConnectorActivities(bao))
+    ws = workspace["id"]
+    conn = (
+        await client.post(
+            f"/api/v1/workspaces/{ws}/connections",
+            json={
+                "name": "topo",
+                "provider": "aws",
+                "config": {"auth_method": "aws_access_key", "regions": [REGION], "home_region": REGION},
+                "secret": {
+                    "access_key_id": aws["key"]["AccessKeyId"],
+                    "secret_access_key": aws["key"]["SecretAccessKey"],
+                },
+            },
+            headers=ADMIN,
+        )
+    ).json()
+    await client.post(f"/api/v1/workspaces/{ws}/connections/{conn['id']}/discover", headers=ADMIN)
+    nets = (
+        await client.get(
+            f"/api/v1/workspaces/{ws}/inventory/resources", params={"type": "network"}, headers=ADMIN
+        )
+    ).json()["items"]
+    assert nets
+    topo = (
+        await client.get(f"/api/v1/workspaces/{ws}/inventory/topology/{nets[0]['id']}", headers=ADMIN)
+    ).json()
+    types = {n["type"] for n in topo["nodes"]}
+    assert {"network", "subnet", "vm"} <= types
+    vms = [n for n in topo["nodes"] if n["type"] == "vm"]
+    subnet_ids = {n["id"] for n in topo["nodes"] if n["type"] == "subnet"}
+    assert len(vms) == 4
+    assert all(v["parent"] in subnet_ids for v in vms)
+    assert topo["mermaid"].startswith("flowchart LR")
+    assert topo["truncated"] is False
+    # Unknown / non-network ids are 404s.
+    r = await client.get(f"/api/v1/workspaces/{ws}/inventory/topology/{vms[0]['id']}", headers=ADMIN)
+    assert r.status_code == 404

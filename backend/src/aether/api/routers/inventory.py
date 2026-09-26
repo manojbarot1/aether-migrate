@@ -16,6 +16,7 @@ from aether.core.errors import ConflictError, NotFoundError
 from aether.core.inventory import ResourceType
 from aether.db.models import CloudConnection, Resource, Snapshot
 from aether.inventory.store import VmFilter, neighbours, search_resources, summary
+from aether.inventory.topology import TopologyNode, network_topology, to_mermaid
 from aether.workflows.discovery import DiscoverConnectionWorkflow, DiscoveryInput
 
 router = APIRouter(prefix="/api/v1/workspaces/{workspace_id}", tags=["inventory"])
@@ -279,4 +280,51 @@ async def get_resource(resource_id: uuid.UUID, ctx: Viewer) -> ResourceDetail:
         created_at_source=r.created_at_source,
         neighbours=[Neighbour(direction=d, kind=k, resource=_summary(o)) for d, k, o in nb],
         snapshot=_snap(snap),
+    )
+
+
+# ----------------------------------------------------------------------------- topology
+
+
+class TopologyNodeOut(BaseModel):
+    id: uuid.UUID
+    type: str
+    native_id: str
+    name: str | None
+    parent: uuid.UUID | None
+    status: str | None
+    detail: str | None
+
+
+class TopologyOut(BaseModel):
+    network: TopologyNodeOut
+    nodes: list[TopologyNodeOut]
+    edges: list[dict[str, str]]
+    truncated: bool
+    mermaid: str
+
+
+@router.get("/inventory/topology/{network_id}", response_model=TopologyOut)
+async def topology(network_id: uuid.UUID, ctx: Viewer, security_groups: bool = True) -> TopologyOut:
+    topo = await network_topology(ctx.session, network_id, include_security_groups=security_groups)
+    if topo is None:
+        raise NotFoundError("network not found")
+
+    def out(n: TopologyNode) -> TopologyNodeOut:
+        return TopologyNodeOut(
+            id=n.id,
+            type=n.type,
+            native_id=n.native_id,
+            name=n.name,
+            parent=n.parent,
+            status=n.status,
+            detail=n.label_detail,
+        )
+
+    return TopologyOut(
+        network=out(topo.network),
+        nodes=[out(n) for n in topo.nodes],
+        edges=topo.edges,
+        truncated=topo.truncated,
+        mermaid=to_mermaid(topo),
     )

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Cable, LayoutDashboard, LogOut, Moon, Radar, ScrollText, Server, Sun, Users } from "lucide-react";
+import { Cable, LayoutDashboard, LogOut, Moon, Network, Radar, ScrollText, Server, Sun, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router";
 import { useAuth } from "../lib/auth";
@@ -41,6 +41,7 @@ export function Layout() {
   const nav = [
     { to: "", label: "Overview", icon: LayoutDashboard, end: true },
     { to: "inventory", label: "Inventory", icon: Server },
+    { to: "topology", label: "Topology", icon: Network },
     { to: "discovery", label: "Discovery runs", icon: Radar },
     { to: "connections", label: "Connections", icon: Cable },
     { to: "audit", label: "Audit log", icon: ScrollText },

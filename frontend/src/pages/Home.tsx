@@ -86,7 +86,7 @@ export function Home() {
             <Field label="Slug" hint="Lowercase letters, digits and dashes. Used in exports and logs.">
               <Input
                 required
-                pattern="[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
                 value={slug}
                 onChange={(e) => {
                   setSlugTouched(true);

@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router";
 import { Badge, Card, Code, ErrorBanner, PageHeader, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
 import { errorMessage } from "../lib/api";
 import { useApi, useWorkspace } from "../lib/context";
-import { gib } from "./Inventory";
+import { gib } from "../lib/format";
 
 type Obj = Record<string, unknown>;
 const str = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));

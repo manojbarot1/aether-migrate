@@ -162,3 +162,21 @@ export interface InventorySummary {
   total_vcpu: number;
   total_memory_mib: number;
 }
+
+export interface TopologyNode {
+  id: string;
+  type: "network" | "subnet" | "vm" | "load_balancer" | "security_group";
+  native_id: string;
+  name: string | null;
+  parent: string | null;
+  status: string | null;
+  detail: string | null;
+}
+
+export interface TopologyView {
+  network: TopologyNode;
+  nodes: TopologyNode[];
+  edges: { from: string; to: string; kind: "routes_to" | "protected_by" | "references" }[];
+  truncated: boolean;
+  mermaid: string;
+}

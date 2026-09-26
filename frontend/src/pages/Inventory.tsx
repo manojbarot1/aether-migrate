@@ -5,10 +5,10 @@ import { Link, useSearchParams } from "react-router";
 import { Badge, Button, Card, EmptyState, ErrorBanner, Input, PageHeader, Select, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
 import { errorMessage } from "../lib/api";
 import { useApi, useWorkspace } from "../lib/context";
+import { gib } from "../lib/format";
 
 const PAGE = 50;
 
-export const gib = (mib: number | null | undefined) => (mib == null ? "—" : `${+(mib / 1024).toFixed(1)} GiB`);
 
 export function Inventory() {
   const api = useApi();
