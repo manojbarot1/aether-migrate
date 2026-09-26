@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Operator CLI for a single-host AETHER MIGRATE installation.
+set -euo pipefail
+# shellcheck source=deploy/scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+TEST_COMPOSE=(docker compose -f "$ROOT/deploy/compose/compose.test.yaml")
+
+usage() {
+  cat <<USAGE
+usage: aetherctl <command>
+
+  up                 start or upgrade the stack (builds images, runs migrations)
+  down               stop the stack (data volumes are kept)
+  ps                 service status
+  logs [svc…]        follow logs
+  unseal             unseal OpenBao (keys from deploy/secrets/openbao-init.json, or prompted)
+  selftest           prove the security controls on the running stack
+  test               lint, type checks and the full test suite in containers
+  backup [DIR]       consistent backup of Postgres + OpenBao (default ./backups/<timestamp>)
+  restore DIR        restore Postgres + OpenBao from a backup directory
+  bao-reconfigure    re-apply OpenBao policies/AppRoles (break-glass root token from unseal keys)
+  sync-idp           update the OIDC client's redirect URIs after AETHER_PUBLIC_URL changes
+USAGE
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  up)      unseal; "${COMPOSE[@]}" up -d --build --wait --wait-timeout 600 ;;
+  down)    "${COMPOSE[@]}" down ;;
+  ps)      "${COMPOSE[@]}" ps "$@" ;;
+  logs)    "${COMPOSE[@]}" logs -f --tail=200 "$@" ;;
+  unseal)  unseal ;;
+  selftest) "$ROOT/deploy/scripts/selftest.sh" ;;
+  test)
+    "${TEST_COMPOSE[@]}" build -q tests
+    "${TEST_COMPOSE[@]}" run --rm --no-deps -e RUFF_CACHE_DIR=/tmp/rc -e MYPY_CACHE_DIR=/tmp/mc \
+      tests sh -c "ruff check src tests && ruff format --check src tests && lint-imports && mypy src"
+    trap '"${TEST_COMPOSE[@]}" down -v >/dev/null 2>&1' EXIT
+    "${TEST_COMPOSE[@]}" run --rm tests
+    ;;
+  backup)  "$ROOT/deploy/scripts/backup.sh" "$@" ;;
+  restore) "$ROOT/deploy/scripts/restore.sh" "$@" ;;
+  bao-reconfigure) unseal; with_root_token configure_openbao; log "restart api and worker-connector if their credentials changed" ;;
+  sync-idp)
+    kc() { "${COMPOSE[@]}" exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@" </dev/null; }
+    kc config credentials --server http://localhost:8080/auth --realm master --user admin \
+      --password "$(cat "$SECRETS/keycloak_admin_password")" >/dev/null
+    cid="$(kc get clients -r aether -q clientId=aether-web --fields id --format csv --noquotes)"
+    kc update "clients/$cid" -r aether \
+      -s "redirectUris=[\"$AETHER_PUBLIC_URL/*\"]" -s "webOrigins=[\"$AETHER_PUBLIC_URL\"]" \
+      -s "attributes.\"post.logout.redirect.uris\"=$AETHER_PUBLIC_URL/*"
+    log "aether-web client now allows $AETHER_PUBLIC_URL" ;;
+  ""|-h|--help|help) usage ;;
+  *) usage; exit 2 ;;
+esac

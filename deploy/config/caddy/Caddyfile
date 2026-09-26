@@ -1,37 +1,16 @@
 {
-  admin off
+	http_port 8080
+	https_port 8443
+	# Admin API only on loopback (used for the healthcheck/metrics), never exposed.
+	admin 127.0.0.1:2019
+	servers {
+		metrics
+	}
 }
 
-{$DOMAIN:localhost} {
-  # TLS — Caddy automatically provisions and renews certificates
-  # For localhost, a self-signed cert is used; set DOMAIN for production
+import /etc/caddy/routes.caddy
 
-  # API
-  reverse_proxy /api/* api:8000
-
-  # AI model gateway
-  reverse_proxy /ai/* ai:8001
-
-  # MCP server
-  reverse_proxy /mcp/* mcp:8002
-
-  # Web SPA — catch-all
-  handle /* {
-    reverse_proxy web:8080
-  }
-
-  # Security headers
-  header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    X-Frame-Options "DENY"
-    X-Content-Type-Options "nosniff"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    -Server
-  }
-
-  # Access log to stdout
-  log {
-    output stdout
-    format json
-  }
+{$AETHER_DOMAIN:localhost} {
+	tls {$AETHER_TLS:internal}
+	import aether_routes
 }

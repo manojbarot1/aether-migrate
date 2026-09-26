@@ -1,117 +1,88 @@
 # AETHER MIGRATE
 
-> Self-hosted, cloud-neutral migration control plane for AWS, Azure, GCP, and IBM Cloud.
+A self-hosted, cloud-neutral migration control plane. It lets engineers discover, understand, cost and plan workload moves across **AWS, Azure, Google Cloud and IBM Cloud**. Every number is traceable to data, and every action is traceable to a person.
 
-**Phase 0 — Foundation** · All packages scaffolded, API working, Docker ready.
+> **Status: v0.1 foundation (Phases 0–1).** You can connect AWS accounts (read-only) with least-privilege, audited, isolated credentials. Discovery, sizing, cost, assessment and planning follow in the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24. **No cloud resource is ever modified by this release.**
 
----
+## Why it is built this way
 
-## What is AETHER MIGRATE?
+| Principle | How it is enforced |
+|---|---|
+| The platform must not become the weakest link | Cloud credentials live in **OpenBao**. The API's AppRole can *write* them but never *read* them. Only the isolated connector worker can read them, and it is the only container with internet egress. |
+| Tenants never see each other's data | Per-workspace roles, plus PostgreSQL **row-level security** set per transaction. The runtime DB role is not a superuser and cannot bypass RLS. |
+| Everything is attributable | Append-only, **hash-chained audit log**: DB grants and a trigger block UPDATE/DELETE/TRUNCATE, even for the owner, and tampering is detected by `verify`. Every cloud API call is recorded. |
+| Long-running work survives failures | **Temporal** workflows. Workflow payloads carry IDs only, never secrets. |
+| Controls are provable, not promised | `aetherctl selftest` checks 15 controls against the running stack. |
 
-AETHER MIGRATE is an open-source control plane for enterprise cloud migrations. It discovers resources across multiple cloud providers, normalises them into a unified model, assesses migration readiness, generates migration plans, and (in later phases) executes them with full audit logging and rollback support.
+## Architecture (single Docker host)
 
-Unlike SaaS migration tools, AETHER MIGRATE runs entirely on your own infrastructure. Credentials never leave your network.
+```
+Browser ─TLS─► edge (Caddy) ─┬─► web (static SPA)
+                             ├─► api (FastAPI) ──► postgres (RLS)   ──► temporal ◄── worker-connector ──► AWS/Azure/GCP/IBM
+                             └─► keycloak (OIDC)    openbao (write-only for api) ◄──── (read-only) ┘        (only egress)
+```
 
----
+Only `edge` publishes ports. The `app`, `data` and `secrets` networks are internal. Details: [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §4.
 
-## Quick Start
+## Install
 
-### Prerequisites
-
-- Docker Engine **25+**
-- Docker Compose **v2** (`docker compose version`)
-- **16 GB RAM** (for all services)
-- **8 GB disk** (for images and database volumes)
-
-### First-time setup
+Requirements: Linux, Docker Engine ≥ 25 with Compose v2, 4 vCPU / 16 GB RAM (8 / 32 GB recommended), and outbound HTTPS for the connector.
 
 ```bash
-git clone https://github.com/your-org/aether-migrate
-cd aether-migrate
-
-# Bootstrap: generates secrets, initialises OpenBao, runs migrations
-make bootstrap
-
-# Start all services in development mode
-make dev
+git clone https://github.com/manojbarot1/aether-migrate.git && cd aether-migrate
+cp .env.example .env          # set AETHER_PUBLIC_URL, AETHER_DOMAIN, AETHER_TLS, AETHER_ADMIN_EMAIL
+deploy/scripts/bootstrap.sh   # secrets, OpenBao init/unseal/policies, stack, first admin
+deploy/scripts/aetherctl selftest
 ```
 
-Open [http://localhost](http://localhost) in your browser.
+`bootstrap.sh` prints the first administrator's temporary password (MFA is enforced at first login). It also writes the OpenBao unseal keys to `deploy/secrets/openbao-init.json`. **Distribute those keys to key holders and delete the file from the host.** See [`docs/runbooks/operations.md`](docs/runbooks/operations.md).
 
-Default Keycloak admin: `admin` / (password set by bootstrap in `.env`)
+### Local development
 
----
-
-## Architecture
-
-```
-Caddy (TLS termination)
-  ├── /api/*     → FastAPI (aether-api)
-  ├── /ai/*      → FastAPI (aether-ai)
-  ├── /mcp/*     → FastAPI (aether-mcp)
-  └── /*         → React SPA (nginx)
-
-Temporal          → worker_domain + worker_connector
-PostgreSQL 17     → all persistent data (RLS-isolated)
-OpenBao           → cloud credentials, transit encryption
-Keycloak 26       → OIDC, RBAC, MFA
+```bash
+cp .env.example .env
+# in .env: AETHER_PUBLIC_URL=http://localhost:8580, EDGE_HTTP_PORT=8580,
+#          AETHER_COMPOSE_OVERLAY=deploy/compose/compose.dev.yaml, AETHER_REQUIRE_ADMIN_MFA=false
+deploy/scripts/bootstrap.sh
 ```
 
-See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the full architecture and phase roadmap.
+The dev overlay serves plain HTTP on `localhost` (a browser secure context), enables the API docs, and exposes the Temporal UI on `127.0.0.1:8233`.
 
----
+## Operate
 
-## Commands
+```
+deploy/scripts/aetherctl up | down | ps | logs [svc] | unseal
+deploy/scripts/aetherctl selftest          # prove security controls on the live stack
+deploy/scripts/aetherctl test              # lint, types, full test suite (in containers)
+deploy/scripts/aetherctl backup [DIR]      # pg_dump ×4 + OpenBao Raft snapshot + checksums
+deploy/scripts/aetherctl restore DIR       # verified restore (needs unseal keys)
+deploy/scripts/aetherctl bao-reconfigure   # break-glass root from unseal-key quorum, re-apply policies
+deploy/scripts/aetherctl sync-idp          # after changing AETHER_PUBLIC_URL
+```
 
-| Command | Description |
-|---------|-------------|
-| `make bootstrap` | First-time setup |
-| `make dev` | Start in dev mode (hot reload) |
-| `make up` | Start in production mode |
-| `make down` | Stop all services |
-| `make logs` | Tail all logs |
-| `make test` | Run Python test suite |
-| `make lint` | Run ruff + ESLint |
-| `make typecheck` | Run mypy |
-| `make build` | Build all Docker images |
-| `make backup` | Back up PostgreSQL and OpenBao |
-| `make upgrade` | Pull, rebuild, migrate, restart |
+## Repository
 
----
+```
+backend/            one Python package `aether` (API, workers, domain, adapters) + tests
+  src/aether/       api/ auth/ audit/ core/ db/ providers/ secrets/ workers/ workflows/
+frontend/           React 19 + Vite + TypeScript SPA (OIDC PKCE, TanStack Query, Tailwind)
+deploy/compose/     compose.yaml (prod), compose.dev.yaml, compose.test.yaml
+deploy/config/      caddy, keycloak realm, openbao config + policies, postgres roles, temporal
+deploy/scripts/     bootstrap, aetherctl, selftest, backup/restore, lint_compose
+docker/             hardened multi-stage Dockerfiles
+docs/               PROJECT_PLAN.md, ADRs, runbooks, review of v0.1.0
+```
 
-## Project Status
+The import boundaries are enforced by `import-linter`: the API layer can never import cloud SDKs or provider adapters.
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Foundation (this PR) | ✅ Complete |
-| 1 | UI Shell | ⬜ |
-| 2a | AWS Discovery | ⬜ |
-| 2b | Azure Discovery | ⬜ |
-| 2c | GCP Discovery | ⬜ |
-| 2d | IBM Cloud Discovery | ⬜ |
-| 3 | AI Assistant | ⬜ |
-| 4 | Migration Planner | ⬜ |
-| 5 | Execute Mode | ⬜ |
-| 6 | IaC Generation | ⬜ |
-| 7 | MCP Server | ⬜ |
-| 8 | HA & Hardening | ⬜ |
+## Quality gates (CI)
 
----
+- **Backend:** ruff, `mypy --strict`, import-linter, and pytest with coverage ≥ 80% against PostgreSQL 18.
+- **Frontend:** ESLint, `tsc` strict, Vitest, and the production build.
+- **Deployment config:** the Compose hardening baseline (`lint_compose.py`) and shellcheck.
+- **Scanning:** gitleaks secret scanning, and Trivy on every image (fails on fixable HIGH/CRITICAL).
+- **Releases:** multi-arch, with SBOM and provenance, signed keylessly with cosign.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy and security architecture.
-
-**TL;DR**: Cloud credentials are stored in OpenBao. The API cannot read them. The connector worker fetches them at runtime. All actions are logged in a tamper-evident SHA-256 hash chain. MFA is required for approver and admin roles.
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
----
-
-## Licence
-
-Apache 2.0
+See [SECURITY.md](SECURITY.md). Please report vulnerabilities privately.

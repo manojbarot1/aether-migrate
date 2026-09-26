@@ -1,43 +1,42 @@
 #!/usr/bin/env bash
-# AETHER MIGRATE — Restore script
-# Restores a PostgreSQL backup created by backup.sh.
-# Usage: ./restore.sh <backup_file.sql.gz>
-
+# Restore a backup made by backup.sh into this installation. DESTRUCTIVE: replaces the
+# current databases and OpenBao data. Requires the OpenBao unseal keys of the backup.
 set -euo pipefail
+# shellcheck source=deploy/scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-COMPOSE_BASE="${REPO_ROOT}/deploy/compose/compose.yaml"
+IN="${1:?usage: restore.sh <backup-dir>}"
+[[ -f "$IN/SHA256SUMS" ]] || die "$IN does not look like a backup directory"
+( cd "$IN" && sha256sum -c --quiet SHA256SUMS ) || die "backup checksum verification failed"
 
-source "${REPO_ROOT}/.env" 2>/dev/null || true
-
-BACKUP_FILE="${1:-}"
-if [[ -z "$BACKUP_FILE" ]] || [[ ! -f "$BACKUP_FILE" ]]; then
-  echo "[ERROR] Usage: $0 <backup_file.sql.gz>"
-  echo "[ERROR] Available backups:"
-  ls "${REPO_ROOT}/backups/"*.sql.gz 2>/dev/null || echo "  (none found)"
-  exit 1
+if [[ "${AETHER_RESTORE_CONFIRM:-}" != "yes" ]]; then
+  read -rp "This REPLACES all AETHER data with the backup from $IN. Type 'restore' to continue: " ans </dev/tty
+  [[ "$ans" == "restore" ]] || die "aborted"
 fi
 
-echo "[WARN] This will DROP and recreate the '${POSTGRES_DB:-aether}' database."
-read -r -p "Type 'yes' to continue: " confirm
-if [[ "$confirm" != "yes" ]]; then
-  echo "[INFO] Restore cancelled."
-  exit 0
-fi
+log "stopping application services"
+"${COMPOSE[@]}" stop edge api worker-connector keycloak temporal >/dev/null
+"${COMPOSE[@]}" up -d postgres openbao >/dev/null
 
-echo "[INFO] Restoring from: ${BACKUP_FILE}"
+for db in aether keycloak temporal temporal_visibility; do
+  case "$db" in
+    aether) owner=aether_owner ;;
+    keycloak) owner=keycloak ;;
+    *) owner=temporal ;;
+  esac
+  log "restoring database $db"
+  "${COMPOSE[@]}" exec -T postgres pg_restore -U postgres -d "$db" --clean --if-exists --no-owner \
+    --role="$owner" <"$IN/$db.dump"
+done
 
-# Drop and recreate DB
-docker compose -f "$COMPOSE_BASE" exec -T postgres \
-  psql -U "${POSTGRES_USER:-aether}" -c "DROP DATABASE IF EXISTS ${POSTGRES_DB:-aether};" postgres
+log "restoring openbao snapshot (you will be asked for unseal keys if they are not on this host)"
+unseal
+# `docker cp` cannot write into a read-only container; stream into its tmpfs instead.
+"${COMPOSE[@]}" exec -T openbao sh -c 'cat > /tmp/openbao.snap' <"$IN/openbao.snap"
+with_root_token bao operator raft snapshot restore -force /tmp/openbao.snap
+"${COMPOSE[@]}" exec -T openbao rm -f /tmp/openbao.snap </dev/null
+unseal
 
-docker compose -f "$COMPOSE_BASE" exec -T postgres \
-  psql -U "${POSTGRES_USER:-aether}" -c "CREATE DATABASE ${POSTGRES_DB:-aether};" postgres
-
-# Restore
-gunzip -c "$BACKUP_FILE" | docker compose -f "$COMPOSE_BASE" exec -T postgres \
-  psql -U "${POSTGRES_USER:-aether}" -d "${POSTGRES_DB:-aether}"
-
-echo "[INFO] Restore complete."
-echo "[INFO] Run 'make up' to restart services."
+log "starting the stack"
+"${COMPOSE[@]}" up -d --wait --wait-timeout 600
+log "restore complete; run 'aetherctl selftest' to verify"

@@ -1,0 +1,41 @@
+# Ephemeral test stack: `docker compose -f deploy/compose/compose.test.yaml run --rm tests`
+# Uses throwaway, test-only secrets from ./test-secrets (never used by real deployments).
+name: aether-test
+
+services:
+  postgres-test:
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+    secrets: [pg_superuser_password, pg_owner_password, pg_app_password]
+    volumes:
+      - ../config/postgres/10-init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    tmpfs:
+      - /var/lib/postgresql:size=512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aether"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  tests:
+    build:
+      context: ../..
+      dockerfile: docker/backend.Dockerfile
+      target: dev
+    image: aether-backend:dev
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    environment:
+      AETHER_ENV: test
+      AETHER_DB_HOST: postgres-test
+      AETHER_LOG_JSON: "false"
+    secrets: [pg_owner_password, pg_app_password]
+    command: ["sh", "-c", "alembic upgrade head && pytest -q --cov=aether --cov-report=term-missing:skip-covered"]
+
+secrets:
+  pg_superuser_password: { file: ./test-secrets/pg_superuser_password }
+  pg_owner_password: { file: ./test-secrets/pg_owner_password }
+  pg_app_password: { file: ./test-secrets/pg_app_password }
