@@ -1,6 +1,8 @@
 import type { UserManager } from "oidc-client-ts";
 import type {
   AuditPage,
+  CatalogStatus,
+  CompareResult,
   ClientConfig,
   Connection,
   InventorySummary,
@@ -90,6 +92,10 @@ export function createApi(manager: UserManager) {
     topology: (wsId: string, networkId: string, securityGroups: boolean) =>
       request<TopologyView>("GET", `${ws(wsId)}/inventory/topology/${networkId}?security_groups=${securityGroups}`),
     resource: (wsId: string, id: string) => request<ResourceDetail>("GET", `${ws(wsId)}/inventory/resources/${id}`),
+
+    catalogStatus: () => request<CatalogStatus>("GET", "/api/v1/catalog/status"),
+    catalogSync: () => request<{ workflow_id: string }>("POST", "/api/v1/catalog/sync"),
+    compare: (wsId: string, body: Json) => request<CompareResult>("POST", `${ws(wsId)}/compare`, body),
 
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {
       const q = new URLSearchParams();

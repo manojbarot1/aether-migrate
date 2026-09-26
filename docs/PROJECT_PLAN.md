@@ -8,7 +8,7 @@ date: "2026-09-24"
 
 | | |
 |---|---|
-| **Status** | In implementation — Phases 0, 1, 2a complete (2026-09-26); see §0.3 |
+| **Status** | In implementation — Phases 0, 1, 2a, 4, 5 complete (2026-09-26); see §0.3 |
 | **Version** | 2.0 (supersedes v1 from `AETHER_MIGRATE_Project_Plan.docx`) |
 | **Date** | 2026-09-24 |
 | **Deployment target** | Docker only (Docker Compose v2, single host for v1; images ready for multi-node later) |
@@ -64,8 +64,10 @@ v1 falls short of "production grade" in five areas:
 | 0 — Foundation | **done** | Compose stack (Caddy, Keycloak, OpenBao, Temporal, Postgres 18), OIDC and RBAC, hash-chained audit, RLS, CI, backup/restore, `aetherctl selftest` |
 | 1 — AWS connection | **done** | Assume-role (platform-generated ExternalId) and access-key connections, policy generator, connection test in the connector worker, excess-permission detection |
 | 2a — AWS discovery | **done** | Temporal region fan-out with per-family coverage; pure normalizer (VM/disk/NIC/VPC/subnet/SG rules/ALB+targets, OS/licence/boot inference with provenance); snapshots with RLS; inventory search + detail + graph neighbours; demo AWS simulator overlay |
-| 4 — Topology | next | Graph view (React Flow + ELK) over the edges table |
-| 3, 5–7 | planned | See §24 |
+| 4 — Topology | **done** | VPC → subnet → VM graph (React Flow + ELK), LB routes, SG references, Mermaid export |
+| 5 — Catalog, sizing & cost | **done** | Daily Temporal-scheduled sync: Azure Retail Prices (on-demand, 1y/3y reservations, Windows uplift, Premium/Standard SSD tiers) for 6 regions, ECB FX; AWS source prices via Price List API during discovery; curated Azure size specs (labelled); pure sizing (like-for-like, cheapest-fit, right-sized with honest fallback) and cost engines with explicit assumptions; compare API + UI |
+| 6 — Assessment | next | Rules engine (port and test v0.1.0 rule ideas) |
+| 3, 7 | planned | See §24 |
 
 v0.1.0 (an earlier autonomous build) was reviewed and its foundation replaced; see [`REVIEW-v0.1.0.md`](REVIEW-v0.1.0.md).
 

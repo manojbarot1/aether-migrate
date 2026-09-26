@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Calculator } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import { Badge, Card, Code, ErrorBanner, PageHeader, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
+import { Badge, Card, Code, LinkButton, ErrorBanner, PageHeader, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
 import { errorMessage } from "../lib/api";
 import { useApi, useWorkspace } from "../lib/context";
 import { gib } from "../lib/format";
@@ -80,7 +80,16 @@ export function ResourceDetail() {
             </span>
           </span>
         }
-        actions={<StatusBadge status={r.status ?? "unknown"} />}
+        actions={
+          <>
+            <StatusBadge status={r.status ?? "unknown"} />
+            {r.type === "vm" && (
+              <LinkButton to={`/w/${workspaceId}/compare?ids=${r.id}`} variant="primary">
+                <Calculator className="size-4" /> Compare to Azure
+              </LinkButton>
+            )}
+          </>
+        }
       />
       <p className="-mt-3 mb-5 text-xs text-[var(--muted)]">
         From snapshot {r.snapshot.id.slice(0, 8)} ({r.snapshot.status}), discovered {relativeTime(r.discovered_at)}.

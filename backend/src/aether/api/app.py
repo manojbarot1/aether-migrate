@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from aether.api.routers import audit, connections, inventory, system, workspaces
+from aether.api.routers import audit, compare, connections, inventory, system, workspaces
 from aether.auth.oidc import JwksVerifier
 from aether.config import Settings, get_settings
 from aether.core.errors import AetherError
@@ -132,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(workspaces.router)
     app.include_router(connections.router)
     app.include_router(inventory.router)
+    app.include_router(compare.router)
     app.include_router(audit.router)
 
     setup_tracing(settings, app)

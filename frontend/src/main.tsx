@@ -46,6 +46,7 @@ const router = createBrowserRouter([
           { path: "inventory", lazy: page(() => import("./pages/Inventory"), "Inventory") },
           { path: "inventory/:resourceId", lazy: page(() => import("./pages/ResourceDetail"), "ResourceDetail") },
           { path: "topology", lazy: page(() => import("./pages/Topology"), "Topology") },
+          { path: "compare", lazy: page(() => import("./pages/Compare"), "Compare") },
           { path: "discovery", lazy: page(() => import("./pages/Discovery"), "Discovery") },
           { path: "connections", lazy: page(() => import("./pages/Connections"), "Connections") },
           { path: "audit", lazy: page(() => import("./pages/Audit"), "Audit") },

@@ -188,3 +188,72 @@ export interface TopologyView {
   truncated: boolean;
   mermaid: string;
 }
+
+export type PriceScenario = "on_demand" | "reserved_1y" | "reserved_3y";
+export type Money = Partial<Record<PriceScenario, number | null>>;
+
+export interface SizedCandidate {
+  sku: string;
+  family: string;
+  vcpu: number;
+  memory_mib: number;
+  cpu_arch: string;
+  local_disk_gib: number;
+  hourly_usd: number;
+  spec_source: string;
+  reasons: string[];
+}
+
+export interface SideCost {
+  sku: string | null;
+  os: string;
+  compute_monthly_usd: Money;
+  disks: { device: string | null; size_gib: number | null; mapped_to: string | null; monthly_usd: number | null; note: string | null }[];
+  disks_monthly_usd: number | null;
+  total_monthly_usd: Money;
+}
+
+export interface CompareItem {
+  resource_id: string;
+  name: string | null;
+  native_id: string;
+  region: string;
+  source_sku: string | null;
+  sizing: {
+    strategy: string;
+    requirement: { vcpu: number; memory_mib: number; cpu_arch: string; basis: string; notes: string[] };
+    candidates: SizedCandidate[];
+    warnings: string[];
+  };
+  cost: {
+    source: SideCost;
+    target: SideCost;
+    one_time: { egress_gib: number; egress_usd: number; dual_running_usd: number | null };
+    assumptions: string[];
+  } | null;
+}
+
+export interface CompareResult {
+  target_provider: string;
+  target_region: string;
+  strategy: string;
+  currency: string;
+  fx_per_usd: number;
+  fx_date: string | null;
+  target_prices_as_of: string | null;
+  target_price_stale: boolean;
+  source_prices_available: boolean;
+  items: CompareItem[];
+  totals: {
+    source_monthly_usd: Money;
+    target_monthly_usd: Money;
+    one_time_usd: number | null;
+    unsized: number;
+  };
+}
+
+export interface CatalogStatus {
+  azure: { region: string; prices: number; oldest_price_at: string }[];
+  aws: { region: string; prices: number; oldest_price_at: string }[];
+  syncs: { id: string; provider: string; status: string; started_at: string; finished_at: string | null }[];
+}

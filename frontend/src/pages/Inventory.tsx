@@ -1,8 +1,8 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Server } from "lucide-react";
+import { ArrowDown, ArrowUp, Calculator, Server } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Badge, Button, Card, EmptyState, ErrorBanner, Input, PageHeader, Select, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
+import { Badge, Button, Card, EmptyState, ErrorBanner, Input, LinkButton, PageHeader, Select, Spinner, StatusBadge, Table, relativeTime } from "../components/ui";
 import { errorMessage } from "../lib/api";
 import { useApi, useWorkspace } from "../lib/context";
 import { gib } from "../lib/format";
@@ -15,6 +15,14 @@ export function Inventory() {
   const { workspaceId } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const [draft, setDraft] = useState(params.get("q") ?? "");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const filters = {
     type: "vm",
@@ -168,6 +176,11 @@ export function Inventory() {
               Reset
             </Button>
             <span className="ml-auto self-center text-sm text-[var(--muted)]">{total} VM{total === 1 ? "" : "s"}</span>
+            {selected.size > 0 && (
+              <LinkButton variant="primary" to={`../compare?ids=${[...selected].join(",")}`} relative="path">
+                <Calculator className="size-4" /> Compare {selected.size} to Azure
+              </LinkButton>
+            )}
           </div>
         </form>
         {page.isLoading ? (
@@ -184,9 +197,31 @@ export function Inventory() {
           </EmptyState>
         ) : (
           <>
-            <Table head={[sortHeader("name", "Name"), "Type", sortHeader("vcpu", "vCPU"), sortHeader("memory", "Memory"), "OS / arch", sortHeader("region", "Region"), sortHeader("status", "State")]}>
+            <Table
+              head={[
+                <input
+                  key="all"
+                  type="checkbox"
+                  aria-label="Select all on this page"
+                  checked={page.data!.items.length > 0 && page.data!.items.every((r) => selected.has(r.id))}
+                  onChange={(e) =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      for (const r of page.data!.items) {
+                        if (e.target.checked) next.add(r.id);
+                        else next.delete(r.id);
+                      }
+                      return next;
+                    })
+                  }
+                />,
+                sortHeader("name", "Name"), "Type", sortHeader("vcpu", "vCPU"), sortHeader("memory", "Memory"), "OS / arch", sortHeader("region", "Region"), sortHeader("status", "State")]}
+            >
               {page.data!.items.map((r) => (
-                <tr key={r.id} className="border-b border-[var(--border)] hover:bg-[var(--panel-2)]">
+                <tr key={r.id} className={`border-b border-[var(--border)] hover:bg-[var(--panel-2)] ${selected.has(r.id) ? "bg-[var(--accent-soft)]" : ""}`}>
+                  <td className="w-8 px-3 py-2">
+                    <input type="checkbox" aria-label={`Select ${r.name ?? r.native_id}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                  </td>
                   <td className="px-3 py-2">
                     <Link to={r.id} className="font-medium hover:text-[var(--accent)]">
                       {r.name ?? r.native_id}

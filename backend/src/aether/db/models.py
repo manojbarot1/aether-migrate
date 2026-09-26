@@ -179,3 +179,78 @@ class ResourceEdge(Base):
     )
     to_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), primary_key=True)
     kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+
+
+# --------------------------------------------------------------------------- catalog
+# Global reference data (not workspace-scoped): instance specs, prices, disk tiers, FX.
+
+
+class CatalogSync(Base):
+    __tablename__ = "catalog_syncs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))  # running | complete | partial | failed
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    regions: Mapped[list[str] | None] = mapped_column(JSONB)
+    stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogInstanceSpec(Base):
+    __tablename__ = "catalog_instance_specs"
+
+    provider: Mapped[str] = mapped_column(String(16), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(64), primary_key=True)
+    family: Mapped[str] = mapped_column(String(32))
+    vcpu: Mapped[int] = mapped_column()
+    memory_mib: Mapped[int] = mapped_column()
+    cpu_arch: Mapped[str] = mapped_column(String(16))
+    cpu_vendor: Mapped[str | None] = mapped_column(String(32))
+    gpu_count: Mapped[int] = mapped_column(default=0)
+    gpu_model: Mapped[str | None] = mapped_column(String(64))
+    local_disk_gib: Mapped[int] = mapped_column(default=0)
+    generation: Mapped[int] = mapped_column(default=0)
+    spec_source: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CatalogPrice(Base):
+    __tablename__ = "catalog_prices"
+
+    provider: Mapped[str] = mapped_column(String(16), primary_key=True)
+    region: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(64), primary_key=True)
+    os: Mapped[str] = mapped_column(String(16), primary_key=True)
+    model: Mapped[str] = mapped_column(String(16), primary_key=True)
+    hourly_usd: Mapped[float] = mapped_column()
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(128))
+    sync_id: Mapped[uuid.UUID | None] = mapped_column()
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CatalogDiskPrice(Base):
+    __tablename__ = "catalog_disk_prices"
+
+    provider: Mapped[str] = mapped_column(String(16), primary_key=True)
+    region: Mapped[str] = mapped_column(String(64), primary_key=True)
+    disk_class: Mapped[str] = mapped_column(String(32), primary_key=True)
+    tier: Mapped[str] = mapped_column(String(16), primary_key=True)  # "" for per-GiB classes
+    size_gib: Mapped[int | None] = mapped_column()
+    iops: Mapped[int | None] = mapped_column()
+    monthly_usd: Mapped[float | None] = mapped_column()
+    gib_month_usd: Mapped[float | None] = mapped_column()
+    source: Mapped[str] = mapped_column(String(128))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FxRateRow(Base):
+    __tablename__ = "fx_rates"
+
+    currency: Mapped[str] = mapped_column(String(3), primary_key=True)
+    per_usd: Mapped[float] = mapped_column()
+    rate_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(128))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

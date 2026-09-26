@@ -9,19 +9,24 @@ import asyncio
 import contextlib
 import signal
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 from temporalio import activity
 from temporalio.worker import Worker
 
 from aether.audit.writer import Actor, AuditRecord, record
+from aether.catalog import aws as aws_prices
+from aether.catalog import azure as azure_catalog
+from aether.catalog.fx import fetch_ecb
+from aether.catalog.store import upsert_disks, upsert_fx, upsert_prices, upsert_specs
 from aether.config import Settings, get_settings
 from aether.core.enums import ActorType, AuditStatus, AuthMethod, ConnectionStatus
-from aether.core.inventory import CoverageStatus
-from aether.db.models import CloudConnection, Snapshot
-from aether.db.session import init_engine, workspace_scope
+from aether.core.inventory import CoverageEntry, CoverageStatus
+from aether.db.models import CatalogSync, CloudConnection, Snapshot
+from aether.db.session import init_engine, session_scope, workspace_scope
 from aether.inventory.store import write_bundle
 from aether.logging import configure_logging, get_logger
 from aether.providers.aws.adapter import BOTO_CONFIG, AwsAdapter, CallRecorder
@@ -31,6 +36,13 @@ from aether.providers.base.adapter import ConnCtx
 from aether.secrets.openbao import OpenBaoClient, OpenBaoError
 from aether.telemetry import setup_tracing
 from aether.temporal_client import connect
+from aether.workflows.catalog import (
+    SCHEDULE_ID,
+    SYNC_AZURE_ACTIVITY,
+    SYNC_FX_ACTIVITY,
+    CatalogSyncInput,
+    SyncCatalogWorkflow,
+)
 from aether.workflows.connection_test import (
     TEST_CONNECTION_ACTIVITY,
     TestConnectionInput,
@@ -53,15 +65,28 @@ PLATFORM_AWS_SECRET_PATH = "platform/aws"
 HEARTBEAT_FILE = Path("/tmp/worker-heartbeat")  # noqa: S108 - tmpfs inside the container
 
 
+def _classify_pricing_error(e: Exception) -> tuple[CoverageStatus, str]:
+    from botocore.exceptions import ClientError
+
+    if isinstance(e, ClientError):
+        code = e.response.get("Error", {}).get("Code", "ClientError")
+        denied = code in ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation")
+        return (CoverageStatus.DENIED if denied else CoverageStatus.ERROR), code
+    return CoverageStatus.ERROR, type(e).__name__
+
+
 def _safe_heartbeat(detail: str) -> None:
     with contextlib.suppress(RuntimeError):  # not running inside an activity (tests)
         activity.heartbeat(detail)
 
 
 class ConnectorActivities:
-    def __init__(self, bao: OpenBaoClient, aws: AwsAdapter | None = None) -> None:
+    def __init__(
+        self, bao: OpenBaoClient, aws: AwsAdapter | None = None, settings: Settings | None = None
+    ) -> None:
         self._bao = bao
         self._aws = aws or AwsAdapter()
+        self._settings = settings or get_settings()
 
     async def _platform_secret(self) -> dict[str, str] | None:
         try:
@@ -120,8 +145,29 @@ class ConnectorActivities:
             account = session.client("sts", config=BOTO_CONFIG).get_caller_identity()["Account"]
             return collect_region(session, account, inp.region, heartbeat)
 
+        def collect_prices(session: Any, skus: set[str]) -> tuple[Any, Any]:
+            return aws_prices.fetch_prices(session, inp.region, skus)
+
         try:
             raw, coverage = await asyncio.to_thread(collect)
+            # Source list prices for the SKUs we found (global catalog data). Best effort:
+            # a missing pricing permission degrades cost comparison, not discovery.
+            skus = {i.get("InstanceType") for i in raw.instances if i.get("InstanceType")}
+            if skus:
+                try:
+                    session = await asyncio.to_thread(self._aws.session, ctx, recorder, inp.region)
+                    src_prices, src_disks = await asyncio.to_thread(collect_prices, session, skus)
+                    async with session_scope() as cs:
+                        await upsert_prices(cs, src_prices, None)
+                        await upsert_disks(cs, src_disks)
+                    coverage.append(
+                        CoverageEntry(region=inp.region, kind="pricing:ec2", status=CoverageStatus.OK)
+                    )
+                except Exception as e:
+                    status, detail = _classify_pricing_error(e)
+                    coverage.append(
+                        CoverageEntry(region=inp.region, kind="pricing:ec2", status=status, detail=detail)
+                    )
         finally:
             ctx.secret = ctx.platform_secret = None
         bundle = normalize_region(snap_id, raw)
@@ -155,7 +201,11 @@ class ConnectorActivities:
                 calls[k] = calls.get(k, 0) + v
         if fin.fatal_error:
             status = "failed"
-        elif any(c.get("status") != CoverageStatus.OK for c in coverage):
+        elif any(
+            c.get("status") != CoverageStatus.OK
+            for c in coverage
+            if not str(c.get("kind", "")).startswith("pricing:")
+        ):
             status = "partial"
         else:
             status = "complete"
@@ -193,6 +243,59 @@ class ConnectorActivities:
             )
         log.info("discovery.finished", snapshot_id=str(snap_id), status=status, **{"resources": totals})
         return {"status": status, **stats}
+
+    # ------------------------------------------------------------------ catalog
+
+    @activity.defn(name=SYNC_FX_ACTIVITY)
+    async def catalog_sync_fx(self) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            rates = await fetch_ecb(client)
+        async with session_scope() as s:
+            n = await upsert_fx(s, rates)
+        return {"currencies": n, "rate_date": str(rates[0].rate_date)}
+
+    @activity.defn(name=SYNC_AZURE_ACTIVITY)
+    async def catalog_sync_azure(self, inp: CatalogSyncInput) -> dict[str, Any]:
+        regions = inp.regions or self._settings.catalog_azure_regions
+        sync = CatalogSync(id=uuid.uuid4(), provider="azure", status="running", regions=regions)
+        async with session_scope() as s:
+            s.add(sync)
+            await upsert_specs(s, azure_catalog.curated_specs())
+        stats: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        async with httpx.AsyncClient() as client:
+            for region in regions:
+                activity.heartbeat(region)
+                try:
+                    prices, disks = await azure_catalog.fetch_region(client, region)
+                except httpx.HTTPError as e:
+                    errors[region] = type(e).__name__
+                    continue
+                async with session_scope() as s:
+                    stats[region] = {
+                        "prices": await upsert_prices(s, prices, sync.id),
+                        "disk_tiers": await upsert_disks(s, disks),
+                    }
+        async with session_scope() as s:
+            row = await s.get(CatalogSync, sync.id)
+            if row is not None:
+                row.status = "complete" if not errors else ("partial" if stats else "failed")
+                row.finished_at = datetime.now(UTC)
+                row.stats = {"regions": stats, "errors": errors}
+                await record(
+                    s,
+                    AuditRecord(
+                        actor=Actor(ActorType.SYSTEM, "catalog-sync", "catalog-sync")
+                        if not inp.requested_by
+                        else Actor(ActorType.USER, inp.requested_by, None),
+                        action="catalog.sync",
+                        status=AuditStatus.SUCCESS if not errors else AuditStatus.FAILURE,
+                        target_type="catalog",
+                        target_id="azure",
+                        details={"regions": regions, "stats": stats, "errors": errors},
+                    ),
+                )
+        return {"regions": stats, "errors": errors}
 
     # ------------------------------------------------------------------ connection test
 
@@ -260,6 +363,35 @@ async def _heartbeat(stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=15)
 
 
+async def _ensure_catalog_schedule(client: Any, settings: Settings) -> None:
+    """Daily catalog refresh; created once, idempotently. Runs immediately on first creation."""
+    from temporalio.client import (
+        Schedule,
+        ScheduleActionStartWorkflow,
+        ScheduleAlreadyRunningError,
+        ScheduleIntervalSpec,
+        ScheduleSpec,
+    )
+
+    try:
+        await client.create_schedule(
+            SCHEDULE_ID,
+            Schedule(
+                action=ScheduleActionStartWorkflow(
+                    SyncCatalogWorkflow.run,
+                    CatalogSyncInput(),
+                    id="catalog-sync-scheduled",
+                    task_queue=settings.connector_task_queue,
+                ),
+                spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=timedelta(hours=24))]),
+            ),
+            trigger_immediately=True,
+        )
+        log.info("catalog.schedule_created")
+    except ScheduleAlreadyRunningError:
+        pass
+
+
 async def run(settings: Settings) -> None:
     configure_logging(settings.log_level, settings.log_json)
     setup_tracing(settings)
@@ -276,7 +408,7 @@ async def run(settings: Settings) -> None:
     if client is None:
         raise RuntimeError("could not connect to Temporal")
 
-    acts = ConnectorActivities(bao)
+    acts = ConnectorActivities(bao, settings=settings)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -285,8 +417,10 @@ async def run(settings: Settings) -> None:
     worker = Worker(
         client,
         task_queue=settings.connector_task_queue,
-        workflows=[TestConnectionWorkflow, DiscoverConnectionWorkflow],
+        workflows=[TestConnectionWorkflow, DiscoverConnectionWorkflow, SyncCatalogWorkflow],
         activities=[
+            acts.catalog_sync_fx,
+            acts.catalog_sync_azure,
             acts.test_connection,
             acts.discovery_list_regions,
             acts.discovery_region,
@@ -294,6 +428,7 @@ async def run(settings: Settings) -> None:
         ],
         max_concurrent_activities=20,
     )
+    await _ensure_catalog_schedule(client, settings)
     log.info("worker.started", task_queue=settings.connector_task_queue)
     hb = asyncio.create_task(_heartbeat(stop))
     async with worker:

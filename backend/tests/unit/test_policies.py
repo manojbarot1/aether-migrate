@@ -9,7 +9,7 @@ from aether.core.policies import (
 )
 
 AWS_DIR = Path(__file__).parents[2] / "src/aether/providers/aws"
-SOURCES = [AWS_DIR / "adapter.py", AWS_DIR / "discovery.py"]
+SOURCES = [AWS_DIR / "adapter.py", AWS_DIR / "discovery.py", AWS_DIR.parents[1] / "catalog/aws.py"]
 
 # boto3 method name -> IAM action. Extend when the adapter calls new operations.
 BOTO_TO_IAM = {
@@ -26,6 +26,7 @@ BOTO_TO_IAM = {
     "describe_load_balancers": "elasticloadbalancing:DescribeLoadBalancers",
     "describe_target_groups": "elasticloadbalancing:DescribeTargetGroups",
     "describe_target_health": "elasticloadbalancing:DescribeTargetHealth",
+    "get_products": "pricing:GetProducts",
     "simulate_principal_policy": None,  # self-simulation statement, scoped to the role itself
     "assume_role": None,  # governed by the customer's trust policy, not the permissions policy
     "get_paginator": None,

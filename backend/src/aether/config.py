@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     # The platform's own AWS identity that customers trust in their role's trust policy.
     aws_platform_principal_arn: str | None = None
 
+    # Catalog: target regions priced by the daily sync, and the default display currency.
+    catalog_azure_regions: list[str] = Field(
+        default_factory=lambda: [
+            "westeurope",
+            "northeurope",
+            "germanywestcentral",
+            "eastus",
+            "eastus2",
+            "uksouth",
+        ]
+    )
+    default_currency: str = "EUR"
+
     # Observability
     otel_endpoint: str | None = Field(
         default=None, description="OTLP gRPC endpoint, e.g. http://otel-collector:4317"
