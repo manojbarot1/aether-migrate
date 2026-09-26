@@ -259,6 +259,12 @@ def test_instance_store_is_flagged_ephemeral() -> None:
     ]
 
 
+def test_family_is_inferred_from_distribution_when_platform_unknown() -> None:
+    out = infer_os({}, {"Name": "ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server"})
+    assert (out["os_family"], out["provenance"]["os_family"]) == ("linux", "inferred")
+    assert out["license_model"] == "unknown"
+
+
 @pytest.mark.parametrize(
     ("name", "distro", "version"),
     [

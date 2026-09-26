@@ -9,7 +9,7 @@ from typing import Any
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 
 from aether.core.connections import CheckResult, ConnectionTestResult
 from aether.core.enums import AuthMethod, CheckStatus, Provider
@@ -144,7 +144,7 @@ class AwsAdapter:
         try:
             session = self.session(ctx, recorder)
             ident = session.client("sts", config=BOTO_CONFIG).get_caller_identity()
-        except (ClientError, BotoCoreError, ValueError) as e:
+        except Exception as e:
             checks.append(
                 CheckResult(id="auth", status=CheckStatus.FAIL, message=f"Authentication failed: {_err(e)}")
             )
@@ -195,7 +195,7 @@ class AwsAdapter:
                         details={"enabled": enabled},
                     )
                 )
-        except (ClientError, BotoCoreError) as e:
+        except Exception as e:
             checks.append(
                 CheckResult(id="regions", status=CheckStatus.FAIL, message=f"EC2 read failed: {_err(e)}")
             )
@@ -232,7 +232,7 @@ class AwsAdapter:
                     id="permissions", status=CheckStatus.WARN, message=f"Simulation failed: {_err(e)}"
                 )
             ]
-        except (BotoCoreError, NotImplementedError) as e:
+        except Exception as e:
             return [
                 CheckResult(
                     id="permissions", status=CheckStatus.WARN, message=f"Simulation failed: {_err(e)}"

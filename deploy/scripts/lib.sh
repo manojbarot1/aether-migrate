@@ -6,7 +6,8 @@ SECRETS="$ROOT/deploy/secrets"
 if [[ -f "$ROOT/.env" ]]; then set -a; source "$ROOT/.env"; set +a; fi
 COMPOSE=(docker compose --project-directory "$ROOT/deploy/compose" -f "$ROOT/deploy/compose/compose.yaml")
 [[ -f "$ROOT/.env" ]] && COMPOSE+=(--env-file "$ROOT/.env")
-[[ -n "${AETHER_COMPOSE_OVERLAY:-}" ]] && COMPOSE+=(-f "$ROOT/$AETHER_COMPOSE_OVERLAY")
+# Space-separated list of overlay files, relative to the repository root.
+for overlay in ${AETHER_COMPOSE_OVERLAY:-}; do COMPOSE+=(-f "$ROOT/$overlay"); done
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }

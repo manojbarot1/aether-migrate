@@ -37,13 +37,19 @@ async def env():  # type: ignore[no-untyped-def]
 
 
 def _inp() -> DiscoveryInput:
-    return DiscoveryInput(workspace_id=str(uuid.uuid4()), connection_id=str(uuid.uuid4()),
-                          snapshot_id=str(uuid.uuid4()), requested_by="u")
+    return DiscoveryInput(
+        workspace_id=str(uuid.uuid4()),
+        connection_id=str(uuid.uuid4()),
+        snapshot_id=str(uuid.uuid4()),
+        requested_by="u",
+    )
 
 
 async def _run(env: WorkflowEnvironment, activities: list[Any]) -> dict[str, Any]:
     queue = f"q-{uuid.uuid4()}"
-    async with Worker(env.client, task_queue=queue, workflows=[DiscoverConnectionWorkflow], activities=activities):
+    async with Worker(
+        env.client, task_queue=queue, workflows=[DiscoverConnectionWorkflow], activities=activities
+    ):
         result: dict[str, Any] = await env.client.execute_workflow(
             DiscoverConnectionWorkflow.run, _inp(), id=f"wf-{uuid.uuid4()}", task_queue=queue
         )
@@ -61,8 +67,11 @@ async def test_regions_fan_out_and_failures_become_coverage(env: WorkflowEnviron
     async def region(inp: RegionInput) -> RegionResult:
         if inp.region == "ap-south-1":
             raise ApplicationError("boom", non_retryable=True)
-        return RegionResult(region=inp.region, counts={"vm": 2},
-                            coverage=[{"region": inp.region, "kind": "ec2:instances", "status": "ok"}])
+        return RegionResult(
+            region=inp.region,
+            counts={"vm": 2},
+            coverage=[{"region": inp.region, "kind": "ec2:instances", "status": "ok"}],
+        )
 
     @activity.defn(name=FINALIZE_ACTIVITY)
     async def finalize(fin: FinalizeInput) -> dict[str, Any]:

@@ -2,7 +2,12 @@
 
 A self-hosted, cloud-neutral migration control plane. It lets engineers discover, understand, cost and plan workload moves across **AWS, Azure, Google Cloud and IBM Cloud**. Every number is traceable to data, and every action is traceable to a person.
 
-> **Status: v0.1 foundation (Phases 0–1).** You can connect AWS accounts (read-only) with least-privilege, audited, isolated credentials. Discovery, sizing, cost, assessment and planning follow in the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24. **No cloud resource is ever modified by this release.**
+> **Status: v0.2 (Phases 0, 1, 2a).**
+>
+> - **Works today:** connect AWS accounts read-only, with least-privilege, audited, isolated credentials. Discover VMs, disks, networks, security groups and load balancers across regions, with coverage reporting. Search the normalized inventory and inspect any resource with its relationships.
+> - **Next:** topology, sizing, cost, assessment and planning follow the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24.
+>
+> **No cloud resource is ever modified by this release.**
 
 ## Why it is built this way
 
@@ -47,6 +52,17 @@ deploy/scripts/bootstrap.sh
 ```
 
 The dev overlay serves plain HTTP on `localhost` (a browser secure context), enables the API docs, and exposes the Temporal UI on `127.0.0.1:8233`.
+
+### Demo without a cloud account
+
+```bash
+# in .env:
+AETHER_COMPOSE_OVERLAY="deploy/compose/compose.dev.yaml deploy/compose/compose.demo.yaml"
+```
+
+The demo overlay starts an AWS simulator (moto) seeded with a 20-VM, 3-region estate. It includes tiered security groups, EBS volumes and an ALB. The connector is pointed at the simulator. The seed job prints a demo access key (`docker logs aether-aws-sim-seed-1`). Create an access-key connection with it, test it, and run discovery.
+
+**Never enable the demo overlay on an installation with real connections.**
 
 ## Operate
 

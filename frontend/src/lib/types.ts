@@ -99,3 +99,66 @@ export interface ClientConfig {
   version: string;
   env: string;
 }
+
+export interface CoverageEntry {
+  region: string;
+  kind: string;
+  status: "ok" | "denied" | "disabled" | "throttled_partial" | "error";
+  detail?: string | null;
+}
+
+export interface Snapshot {
+  id: string;
+  connection_id: string;
+  provider: string;
+  status: "running" | "complete" | "partial" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  regions: string[] | null;
+  coverage: CoverageEntry[] | null;
+  stats: { resources?: Record<string, number>; regions?: number; cloud_calls?: number } | null;
+  error: string | null;
+}
+
+export interface ResourceSummary {
+  id: string;
+  type: string;
+  native_id: string;
+  name: string | null;
+  provider: string;
+  account: string;
+  region: string;
+  zone: string | null;
+  status: string | null;
+  tags: Record<string, string>;
+  vcpu: number | null;
+  memory_mib: number | null;
+  cpu_arch: string | null;
+  os_family: string | null;
+  source_sku: string | null;
+  snapshot_id: string;
+  connection_id: string;
+  discovered_at: string;
+}
+
+export interface ResourcePage {
+  items: ResourceSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ResourceDetail extends ResourceSummary {
+  spec: Record<string, unknown>;
+  raw: Record<string, unknown>;
+  created_at_source: string | null;
+  neighbours: { direction: "in" | "out"; kind: string; resource: ResourceSummary }[];
+  snapshot: Snapshot;
+}
+
+export interface InventorySummary {
+  resources_by_type: Record<string, number>;
+  vms_by_region: { region: string; count: number }[];
+  total_vcpu: number;
+  total_memory_mib: number;
+}

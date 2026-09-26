@@ -134,6 +134,9 @@ def infer_os(instance: Raw, image: Raw | None) -> dict[str, Any]:
             out["os_distribution"] = distro
             out["provenance"]["os_distribution"] = Provenance.INFERRED
             break
+    if out["os_family"] == "unknown" and out.get("os_distribution"):
+        out["os_family"] = "windows" if out["os_distribution"] == "windows-server" else "linux"
+        out["provenance"]["os_family"] = Provenance.INFERRED
     version = None
     if out.get("os_distribution") == "ubuntu":
         for codename, ver in _UBUNTU_CODENAMES.items():

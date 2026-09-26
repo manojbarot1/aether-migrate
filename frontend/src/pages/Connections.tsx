@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cable, Copy, FileKey2, Play, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Cable, Copy, FileKey2, Play, Plus, Radar, RotateCw, Trash2 } from "lucide-react";
 import { Fragment, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router";
 import {
   Badge,
   Button,
@@ -276,6 +277,8 @@ export function Connections() {
   const qc = useQueryClient();
   const { workspaceId, can } = useWorkspace();
   const canManage = can("connection-admin");
+  const canDiscover = can("analyst");
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [setupFor, setSetupFor] = useState<Connection | null>(null);
   const [rotateFor, setRotateFor] = useState<Connection | null>(null);
@@ -287,10 +290,16 @@ export function Connections() {
 
   const test = useMutation({
     mutationFn: (id: string) => api.testConnection(workspaceId, id),
+    onMutate: () => setError(null),
     onSuccess: async (c) => {
       setExpanded(c.id);
       await refresh();
     },
+    onError: (e) => setError(errorMessage(e)),
+  });
+  const discover = useMutation({
+    mutationFn: (id: string) => api.discover(workspaceId, id),
+    onSuccess: () => navigate(`/w/${workspaceId}/discovery`),
     onError: (e) => setError(errorMessage(e)),
   });
   const remove = useMutation({
@@ -321,16 +330,14 @@ export function Connections() {
             {canManage ? "Add an AWS account to begin. Azure, GCP and IBM Cloud follow in later releases." : "A connection administrator can add cloud accounts."}
           </EmptyState>
         ) : (
-          <Table head={["Name", "Provider", "Auth", "Scope", "Status", "Last test", ""]}>
+          <Table head={["Name", "Auth", "Scope", "Status", "Last test", ""]}>
             {conns.data!.map((c) => (
               <Fragment key={c.id}>
                 <tr className="border-b border-[var(--border)] align-middle">
                   <td className="px-3 py-2">
                     <button className="font-medium hover:text-[var(--accent)]" onClick={() => setExpanded(expanded === c.id ? null : c.id)}>
                       {c.name}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2">
+                    </button>{" "}
                     <Badge tone="accent">{c.provider.toUpperCase()}</Badge>
                   </td>
                   <td className="px-3 py-2 text-[var(--muted)]">{c.auth_method === "aws_assume_role" ? "Assume role" : `Access key v${c.secret_version ?? "?"}`}</td>
@@ -341,17 +348,28 @@ export function Connections() {
                   <td className="px-3 py-2 text-[var(--muted)]">{relativeTime(c.last_tested_at)}</td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" onClick={() => setSetupFor(c)} title="Setup instructions">
-                        <FileKey2 className="size-4" /> Setup
+                      <Button variant="ghost" onClick={() => setSetupFor(c)} title="Setup instructions" aria-label={`Setup ${c.name}`}>
+                        <FileKey2 className="size-4" />
                       </Button>
+                      {canDiscover && (
+                        <Button
+                          variant="ghost"
+                          title="Run discovery"
+                          busy={discover.isPending && discover.variables === c.id}
+                          disabled={c.status === "error" || c.status === "untested"}
+                          onClick={() => discover.mutate(c.id)}
+                        >
+                          <Radar className="size-4" /> Discover
+                        </Button>
+                      )}
                       {canManage && (
                         <>
-                          <Button variant="ghost" busy={test.isPending && test.variables === c.id} onClick={() => test.mutate(c.id)}>
+                          <Button variant="ghost" title="Test connection" busy={test.isPending && test.variables === c.id} onClick={() => test.mutate(c.id)}>
                             <Play className="size-4" /> Test
                           </Button>
                           {c.auth_method === "aws_access_key" && (
-                            <Button variant="ghost" onClick={() => setRotateFor(c)}>
-                              <RotateCw className="size-4" /> Rotate
+                            <Button variant="ghost" title="Rotate access key" aria-label={`Rotate key for ${c.name}`} onClick={() => setRotateFor(c)}>
+                              <RotateCw className="size-4" />
                             </Button>
                           )}
                           <Button
@@ -370,7 +388,7 @@ export function Connections() {
                 </tr>
                 {expanded === c.id && (
                   <tr className="border-b border-[var(--border)] bg-[var(--panel-2)]">
-                    <td colSpan={7} className="px-4 py-3">
+                    <td colSpan={6} className="px-4 py-3">
                       <TestResult c={c} />
                     </td>
                   </tr>

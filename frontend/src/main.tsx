@@ -9,6 +9,9 @@ import { AuthProvider, FullPageMessage, createUserManager } from "./lib/auth";
 import { ApiContext } from "./lib/context";
 import { Audit } from "./pages/Audit";
 import { Connections } from "./pages/Connections";
+import { Discovery } from "./pages/Discovery";
+import { Inventory } from "./pages/Inventory";
+import { ResourceDetail } from "./pages/ResourceDetail";
 import { Home } from "./pages/Home";
 import { Members } from "./pages/Members";
 import { Overview } from "./pages/Overview";
@@ -41,6 +44,9 @@ const router = createBrowserRouter([
         path: "w/:workspaceId",
         children: [
           { index: true, element: <Overview /> },
+          { path: "inventory", element: <Inventory /> },
+          { path: "inventory/:resourceId", element: <ResourceDetail /> },
+          { path: "discovery", element: <Discovery /> },
           { path: "connections", element: <Connections /> },
           { path: "audit", element: <Audit /> },
           { path: "members", element: <Members /> },

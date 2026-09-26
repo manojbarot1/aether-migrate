@@ -3,10 +3,14 @@ import type {
   AuditPage,
   ClientConfig,
   Connection,
+  InventorySummary,
   Me,
   Member,
   PolicyTemplate,
+  ResourceDetail,
+  ResourcePage,
   Role,
+  Snapshot,
   Workspace,
 } from "./types";
 
@@ -71,6 +75,18 @@ export function createApi(manager: UserManager) {
     deleteConnection: (wsId: string, id: string) => request<void>("DELETE", `${ws(wsId)}/connections/${id}`),
     testConnection: (wsId: string, id: string) => request<Connection>("POST", `${ws(wsId)}/connections/${id}/test`),
     connectionSetup: (wsId: string, id: string) => request<PolicyTemplate>("GET", `${ws(wsId)}/connections/${id}/setup`),
+
+    discover: (wsId: string, connectionId: string) =>
+      request<Snapshot>("POST", `${ws(wsId)}/connections/${connectionId}/discover`),
+    snapshots: (wsId: string, connectionId?: string) =>
+      request<Snapshot[]>("GET", `${ws(wsId)}/snapshots${connectionId ? `?connection_id=${connectionId}` : ""}`),
+    inventorySummary: (wsId: string) => request<InventorySummary>("GET", `${ws(wsId)}/inventory/summary`),
+    resources: (wsId: string, params: Record<string, string | number | undefined>) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") q.set(k, String(v));
+      return request<ResourcePage>("GET", `${ws(wsId)}/inventory/resources?${q.toString()}`);
+    },
+    resource: (wsId: string, id: string) => request<ResourceDetail>("GET", `${ws(wsId)}/inventory/resources/${id}`),
 
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {
       const q = new URLSearchParams();

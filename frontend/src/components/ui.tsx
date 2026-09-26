@@ -22,7 +22,7 @@ export function Button({
   return (
     <button
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50",
         styles[variant],
         className,
       )}
@@ -103,6 +103,8 @@ export function StatusBadge({ status }: { status: string }) {
     case "ok":
     case "pass":
     case "success":
+    case "running":
+    case "complete":
       return (
         <Badge tone="ok">
           <CheckCircle2 className="size-3.5" aria-hidden /> {status}

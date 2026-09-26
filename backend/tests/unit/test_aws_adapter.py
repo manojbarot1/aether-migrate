@@ -7,6 +7,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from aether.core.connections import CheckResult
 from aether.core.enums import AuthMethod, CheckStatus, ConnectionStatus
 from aether.providers.aws.adapter import AwsAdapter
 from aether.providers.base.adapter import ConnCtx
@@ -132,3 +133,32 @@ def test_missing_secret_fails_cleanly(aws: None) -> None:
     result = AwsAdapter().test_connection(ctx)
     assert result.status == ConnectionStatus.ERROR
     assert result.checks[0].id == "auth"
+
+
+def test_unparseable_simulation_response_is_a_warning_not_a_crash(
+    aws: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from botocore.parsers import ResponseParserError
+
+    secret = _iam_user_with_policy(["ec2:Describe*"])
+    adapter = AwsAdapter()
+
+    def boom(*_: object, **__: object) -> list[CheckResult]:
+        raise ResponseParserError("Unable to parse response (not well-formed)")
+
+    real = adapter._simulate
+    monkeypatch.setattr(adapter, "_simulate", lambda iam, arn: _wrap(real, iam, arn, boom))
+    ctx = ConnCtx("c0ffee00", AuthMethod.AWS_ACCESS_KEY, {"regions": []}, secret=secret)
+    result = adapter.test_connection(ctx)
+    perms = next(c for c in result.checks if c.id == "permissions")
+    assert perms.status == CheckStatus.WARN
+    assert "ResponseParserError" in perms.message
+
+
+def _wrap(real, iam, arn, boom):  # type: ignore[no-untyped-def]
+    class Iam:
+        def get_paginator(self, _op: str) -> object:
+            boom()
+            raise AssertionError
+
+    return real(Iam(), arn)
