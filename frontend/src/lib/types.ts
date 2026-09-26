@@ -301,3 +301,81 @@ export interface AssessmentRun {
   };
   items: AssessedVm[] | null;
 }
+
+export interface PlanStep {
+  id: string;
+  title: string;
+  pre_check: string;
+  action: string;
+  post_check: string;
+  compensation: string;
+  automated: boolean;
+}
+
+export interface PlanWave {
+  number: number;
+  name: string;
+  vms: string[];
+  reason: string;
+  data_gib: number;
+  initial_sync_hours: number;
+  cutover_downtime_minutes: number;
+  steps: PlanStep[];
+}
+
+export interface PlanScopeVm {
+  resource_id: string;
+  native_id: string;
+  name: string | null;
+  source_sku: string | null;
+  os: string | null;
+  target_sku: string | null;
+  disks_gib: number;
+  readiness: string;
+  load_balancers: string[];
+  open_findings: { rule_id: string; severity: string; title: string }[];
+  monthly_usd: Money;
+}
+
+export interface PlanTotals {
+  vms: number;
+  waves: number;
+  data_gib: number;
+  target_monthly_usd: Money;
+  one_time_usd: number;
+  open_blockers: string[];
+  open_warnings: number;
+}
+
+export interface PlanSummary {
+  id: string;
+  lineage_id: string;
+  version: number;
+  name: string;
+  status: "draft" | "in_review" | "approved" | "rejected" | "superseded";
+  content_hash: string;
+  created_by_display: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  decided_at: string | null;
+  totals: PlanTotals;
+}
+
+export interface PlanDetail extends PlanSummary {
+  content: {
+    planner_version: string;
+    target: { provider: string; region: string; strategy: string };
+    options: { mechanism: string; replication_bandwidth_mbps: number; cutover_window: string; resource_group: string };
+    scope: PlanScopeVm[];
+    excluded: { native_id: string; name: string | null; reason: string }[];
+    prerequisites: { id: string; title: string; detail: string; evidence: Record<string, unknown> }[];
+    waves: PlanWave[];
+    rollback: string[];
+    assumptions: string[];
+    inputs: Record<string, unknown>;
+  };
+  iac_files: string[];
+  iac_notes: string[];
+  reviews: { reviewer_display: string | null; decision: string; comment: string; content_hash: string; created_at: string; expires_at: string | null }[];
+  versions: { id: string; version: number; status: string; created_at: string }[];
+}

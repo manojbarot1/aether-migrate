@@ -143,6 +143,11 @@ function RunView({ runId }: { runId: string }) {
 
   return (
     <>
+      <div className="-mt-2 mb-4 flex justify-end">
+        <Link className="text-sm text-[var(--accent)]" to={`/w/${workspaceId}/plans`}>
+          Create a migration plan from this assessment →
+        </Link>
+      </div>
       <ErrorBanner error={ack.error ? errorMessage(ack.error) : revoke.error ? errorMessage(revoke.error) : null} />
       {info && (
         <div className="mb-4 flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--accent-soft)] px-3 py-2 text-sm">

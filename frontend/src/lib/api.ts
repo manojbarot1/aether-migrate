@@ -9,6 +9,8 @@ import type {
   InventorySummary,
   Me,
   Member,
+  PlanDetail,
+  PlanSummary,
   PolicyTemplate,
   ResourceDetail,
   ResourcePage,
@@ -104,6 +106,35 @@ export function createApi(manager: UserManager) {
     acknowledge: (wsId: string, body: Json) => request<void>("PUT", `${ws(wsId)}/acknowledgements`, body),
     revokeAck: (wsId: string, nativeId: string, ruleId: string) =>
       request<void>("DELETE", `${ws(wsId)}/acknowledgements?native_id=${encodeURIComponent(nativeId)}&rule_id=${ruleId}`),
+
+    plans: (wsId: string) => request<PlanSummary[]>("GET", `${ws(wsId)}/plans`),
+    plan: (wsId: string, id: string) => request<PlanDetail>("GET", `${ws(wsId)}/plans/${id}`),
+    createPlan: (wsId: string, body: Json) => request<PlanDetail>("POST", `${ws(wsId)}/plans`, body),
+    submitPlan: (wsId: string, id: string) => request<PlanDetail>("POST", `${ws(wsId)}/plans/${id}/submit`),
+    reviewPlan: (wsId: string, id: string, body: Json) => request<PlanDetail>("POST", `${ws(wsId)}/plans/${id}/review`, body),
+    revisePlan: (wsId: string, id: string, body: Json) => request<PlanDetail>("POST", `${ws(wsId)}/plans/${id}/revise`, body),
+    planIac: async (wsId: string, id: string, file: string): Promise<string> => {
+      const user = await manager.getUser();
+      const r = await fetch(`${ws(wsId)}/plans/${id}/iac/${encodeURIComponent(file)}`, {
+        headers: user?.access_token ? { Authorization: `Bearer ${user.access_token}` } : {},
+      });
+      if (!r.ok) throw new ApiError(r.status, "error", `Could not load ${file}`, null);
+      return r.text();
+    },
+    downloadPlan: async (wsId: string, id: string, fmt: "json" | "markdown" | "opentofu"): Promise<void> => {
+      const user = await manager.getUser();
+      const r = await fetch(`${ws(wsId)}/plans/${id}/export/${fmt}`, {
+        headers: user?.access_token ? { Authorization: `Bearer ${user.access_token}` } : {},
+      });
+      if (!r.ok) throw new ApiError(r.status, "error", "Export failed", null);
+      const name = /filename="([^"]+)"/.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? `plan.${fmt}`;
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
 
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {
       const q = new URLSearchParams();

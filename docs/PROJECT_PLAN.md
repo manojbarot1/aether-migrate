@@ -8,7 +8,7 @@ date: "2026-09-24"
 
 | | |
 |---|---|
-| **Status** | In implementation — Phases 0, 1, 2a, 4, 5, 6 complete (2026-09-26); see §0.3 |
+| **Status** | In implementation — Phases 0, 1, 2a, 4, 5, 6, 7 complete (2026-09-26): read-only v1.0 scope delivered for AWS → Azure; see §0.3 |
 | **Version** | 2.0 (supersedes v1 from `AETHER_MIGRATE_Project_Plan.docx`) |
 | **Date** | 2026-09-24 |
 | **Deployment target** | Docker only (Docker Compose v2, single host for v1; images ready for multi-node later) |
@@ -67,7 +67,7 @@ v1 falls short of "production grade" in five areas:
 | 4 — Topology | **done** | VPC → subnet → VM graph (React Flow + ELK), LB routes, SG references, Mermaid export |
 | 5 — Catalog, sizing & cost | **done** | Daily Temporal-scheduled sync: Azure Retail Prices (on-demand, 1y/3y reservations, Windows uplift, Premium/Standard SSD tiers) for 6 regions, ECB FX; AWS source prices via Price List API during discovery; curated Azure size specs (labelled); pure sizing (like-for-like, cheapest-fit, right-sized with honest fallback) and cost engines with explicit assumptions; compare API + UI |
 | 6 — Assessment | **done** | 19 rules (OS support/EOL, Amazon Linux portability, arm64, boot mode/size, Hyper-V drivers, ephemeral/oversized/high-IOPS/KMS disks, IP change, SG→ASG translation, open admin ports, instance roles, licensing, LB dependencies, tenancy, GPU, no-size), readiness scoring, per-family quota needs, audited acknowledgements that persist across snapshots |
-| 7 — Planner + IaC | **backend done**, UI next | Deterministic plans (waves by LB dependency, steps with pre/post-checks and compensation, downtime, rollback), SHA-256 content hash, immutable content (DB trigger), versions/revise/diff, four-eyes hash-bound approval, exports (JSON, Markdown, OpenTofu zip validated with `tofu validate` against azurerm 4.x) |
+| 7 — Planner + IaC | **done** | Deterministic plans (waves by LB dependency, steps with pre/post-checks and compensation, downtime, rollback), SHA-256 content hash, immutable content (DB trigger), versions/revise/diff, four-eyes hash-bound approval, exports (JSON, Markdown, OpenTofu zip validated with `tofu validate` against azurerm 4.x) |
 | 3 — Assistant | planned | Typed tools over the same APIs |
 
 v0.1.0 (an earlier autonomous build) was reviewed and its foundation replaced; see [`REVIEW-v0.1.0.md`](REVIEW-v0.1.0.md).
