@@ -156,7 +156,15 @@ export interface ResourceDetail extends ResourceSummary {
   snapshot: Snapshot;
 }
 
+export interface Breakdown {
+  key: string;
+  count: number;
+}
+
 export interface InventorySummary {
+  vms_by_os: Breakdown[];
+  vms_by_arch: Breakdown[];
+  vms_by_status: Breakdown[];
   resources_by_type: Record<string, number>;
   vms_by_region: { region: string; count: number }[];
   total_vcpu: number;

@@ -142,6 +142,8 @@ async def test_discovery_end_to_end(
     summary = (await client.get(f"/api/v1/workspaces/{ws}/inventory/summary", headers=viewer)).json()
     assert summary["resources_by_type"]["vm"] == 4
     assert summary["total_vcpu"] == 8 + 3 * 2
+    assert sum(b["count"] for b in summary["vms_by_status"]) == 4
+    assert {b["key"] for b in summary["vms_by_arch"]} == {"x86_64"}
 
     # A second run creates a new snapshot; inventory queries use the latest one only.
     r2 = await client.post(f"/api/v1/workspaces/{ws}/connections/{conn['id']}/discover", headers=admin)

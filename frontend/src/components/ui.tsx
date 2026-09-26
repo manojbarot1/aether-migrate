@@ -1,9 +1,24 @@
 import { AlertTriangle, CheckCircle2, CircleDashed, Loader2, X, XCircle } from "lucide-react";
+import { Link, type LinkProps } from "react-router";
 import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
+
+const BUTTON_BASE =
+  "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_VARIANTS: Record<Variant, string> = {
+  primary: "bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 border-transparent",
+  secondary: "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:bg-[var(--panel-2)]",
+  danger: "bg-[var(--panel)] text-[var(--err)] border-[var(--border)] hover:bg-[var(--panel-2)]",
+  ghost: "bg-transparent text-[var(--muted)] border-transparent hover:text-[var(--text)] hover:bg-[var(--panel-2)]",
+};
+
+/** A navigation link styled as a button (avoids nesting a button inside a link). */
+export function LinkButton({ variant = "secondary", className, ...rest }: LinkProps & { variant?: Variant }) {
+  return <Link className={cx(BUTTON_BASE, BUTTON_VARIANTS[variant], className)} {...rest} />;
+}
 
 export function Button({
   variant = "secondary",
@@ -13,19 +28,9 @@ export function Button({
   disabled,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; busy?: boolean }) {
-  const styles: Record<Variant, string> = {
-    primary: "bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 border-transparent",
-    secondary: "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:bg-[var(--panel-2)]",
-    danger: "bg-[var(--panel)] text-[var(--err)] border-[var(--border)] hover:bg-[var(--panel-2)]",
-    ghost: "bg-transparent text-[var(--muted)] border-transparent hover:text-[var(--text)] hover:bg-[var(--panel-2)]",
-  };
   return (
     <button
-      className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50",
-        styles[variant],
-        className,
-      )}
+      className={cx(BUTTON_BASE, BUTTON_VARIANTS[variant], className)}
       disabled={disabled || busy}
       {...rest}
     >
@@ -37,7 +42,7 @@ export function Button({
 
 export function Card({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-lg border border-[var(--border)] bg-[var(--panel)]", className)}>
+    <section className={cx("rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow)]", className)}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -53,7 +58,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-[var(--muted)]">{subtitle}</p>}
       </div>
       <div className="flex items-center gap-2">{actions}</div>
@@ -205,9 +210,9 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--muted)]">
+          <tr className="border-b border-[var(--border)] bg-[var(--panel-2)] text-left text-[11px] tracking-wide text-[var(--muted)] uppercase">
             {head.map((h, i) => (
-              <th key={i} className="px-3 py-2 font-medium">
+              <th key={i} className="px-3 py-2 font-semibold first:rounded-tl-md last:rounded-tr-md">
                 {h}
               </th>
             ))}

@@ -210,7 +210,22 @@ async def summary(session: AsyncSession) -> dict[str, Any]:
             ).where(Resource.snapshot_id.in_(latest), Resource.type == ResourceType.VM.value)
         )
     ).one()
+
+    async def breakdown(col: Any) -> list[dict[str, Any]]:
+        rows = (
+            await session.execute(
+                select(col, func.count())
+                .where(Resource.snapshot_id.in_(latest), Resource.type == ResourceType.VM.value)
+                .group_by(col)
+                .order_by(func.count().desc())
+            )
+        ).all()
+        return [{"key": k or "unknown", "count": int(c)} for k, c in rows]
+
     return {
+        "vms_by_os": await breakdown(Resource.os_family),
+        "vms_by_arch": await breakdown(Resource.cpu_arch),
+        "vms_by_status": await breakdown(Resource.status),
         "resources_by_type": by_type,
         "vms_by_region": [{"region": r, "count": c} for r, c in by_region],
         "total_vcpu": int(totals[0]),
