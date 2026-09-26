@@ -30,6 +30,25 @@
 		reverse_proxy keycloak:8080
 	}
 
+	# Assistant: served by the separate `assistant` service (the only one with LLM egress).
+	# Replies stream as server-sent events, so responses are flushed immediately.
+	@assistant path_regexp ^/api/v1/workspaces/[^/]+/assistant(/.*)?$
+	handle @assistant {
+		reverse_proxy assistant:8000 {
+			header_up X-Request-ID {http.request.uuid}
+			flush_interval -1
+		}
+	}
+
+	# MCP server (streamable HTTP) and its OAuth protected-resource metadata.
+	@mcp path /mcp /mcp/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
+	handle @mcp {
+		reverse_proxy api:8000 {
+			header_up X-Request-ID {http.request.uuid}
+			flush_interval -1
+		}
+	}
+
 	handle /api/* {
 		# Internal-only API docs stay internal.
 		@docs path /api/docs* /api/openapi.json

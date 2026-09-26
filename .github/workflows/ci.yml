@@ -62,15 +62,16 @@ jobs:
           cp .env.example .env
           for f in pg_superuser_password pg_owner_password pg_app_password pg_temporal_password \
                    pg_keycloak_password keycloak_admin_password bao_api_role_id bao_api_secret_id \
-                   bao_connector_role_id bao_connector_secret_id; do echo x > deploy/secrets/$f; done
+                   bao_connector_role_id bao_connector_secret_id anthropic_api_key; do echo x > deploy/secrets/$f; done
       - name: Compose hardening baseline
         run: >
           docker compose --project-directory deploy/compose -f deploy/compose/compose.yaml --env-file .env
           config --format json | python3 deploy/scripts/lint_compose.py
-      - name: Dev overlay resolves
+      - name: Overlays resolve (dev, demo, local model)
         run: >
           docker compose --project-directory deploy/compose -f deploy/compose/compose.yaml
-          -f deploy/compose/compose.dev.yaml --env-file .env config --quiet
+          -f deploy/compose/compose.dev.yaml -f deploy/compose/compose.demo.yaml -f deploy/compose/compose.ollama.yaml
+          --env-file .env config --quiet
       - name: shellcheck
         run: >
           docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x

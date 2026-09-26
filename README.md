@@ -2,10 +2,10 @@
 
 A self-hosted, cloud-neutral migration control plane. It lets engineers discover, understand, cost and plan workload moves across **AWS, Azure, Google Cloud and IBM Cloud**. Every number is traceable to data, and every action is traceable to a person.
 
-> **Status: v1.0-rc (Phases 0–2a, 4–7): the read-only AWS → Azure path is complete.**
+> **Status: v1.0-rc (Phases 0–7): the read-only AWS → Azure path is complete, with an AI assistant.**
 >
-> - **Works today:** connect AWS accounts read-only, with least-privilege, audited, isolated credentials. Discover VMs, disks, networks, security groups and load balancers across regions, with coverage reporting. Search the normalized inventory and inspect any resource with its relationships. Visualise network topology. Size and price VMs on Azure from live list prices (1y/3y reservations, disks, one-time migration costs, any currency). Assess migration readiness with explainable rules. Generate versioned, hash-signed migration plans with waves, rollback and a validated OpenTofu landing zone, approved under four-eyes review.
-> - **Next:** the AI assistant (Phase 3), more source/target providers (2b/5b), then dry-run and execution (8–10) follow the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24.
+> - **Works today:** connect AWS accounts read-only, with least-privilege, audited, isolated credentials. Discover VMs, disks, networks, security groups and load balancers across regions, with coverage reporting. Search the normalized inventory and inspect any resource with its relationships. Visualise network topology. Size and price VMs on Azure from live list prices (1y/3y reservations, disks, one-time migration costs, any currency). Assess migration readiness with explainable rules. Generate versioned, hash-signed migration plans with waves, rollback and a validated OpenTofu landing zone, approved under four-eyes review. Ask the assistant about all of it in plain language (Claude or a local model), with redaction by default, or connect Claude Desktop, Claude Code or an IDE through the MCP server.
+> - **Next:** more source/target providers (2b/5b), then dry-run and execution (8–10) follow the phases in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §24.
 >
 > **No cloud resource is ever modified by this release.**
 
@@ -17,7 +17,8 @@ A self-hosted, cloud-neutral migration control plane. It lets engineers discover
 | Tenants never see each other's data | Per-workspace roles, plus PostgreSQL **row-level security** set per transaction. The runtime DB role is not a superuser and cannot bypass RLS. |
 | Everything is attributable | Append-only, **hash-chained audit log**: DB grants and a trigger block UPDATE/DELETE/TRUNCATE, even for the owner, and tampering is detected by `verify`. Every cloud API call is recorded. |
 | Long-running work survives failures | **Temporal** workflows. Workflow payloads carry IDs only, never secrets. |
-| Controls are provable, not promised | `aetherctl selftest` checks 15 controls against the running stack. |
+| AI never gets more than the user | The assistant and MCP server use one typed tool registry over the REST endpoints, re-checking the caller's role on every call. No tool can change a cloud. A separate `assistant` container is the only one that can reach a model provider, and it holds no secret-store access. Workspaces choose whether identifiers are redacted before leaving (default), sent as-is, or never leave (local model). |
+| Controls are provable, not promised | `aetherctl selftest` checks 19 controls against the running stack. |
 
 ## Architecture (single Docker host)
 

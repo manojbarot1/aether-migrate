@@ -379,3 +379,84 @@ export interface PlanDetail extends PlanSummary {
   reviews: { reviewer_display: string | null; decision: string; comment: string; content_hash: string; created_at: string; expires_at: string | null }[];
   versions: { id: string; version: number; status: string; created_at: string }[];
 }
+
+// ---------------------------------------------------------------------------- assistant
+
+export type EgressMode = "external_allowed" | "external_redacted" | "local_only";
+
+export interface AssistantStatus {
+  available: boolean;
+  reason: string | null;
+  provider: string;
+  model: string;
+  egress_mode: EgressMode;
+  external: boolean;
+  tokens_this_month: number;
+  monthly_token_budget: number | null;
+  tools: { name: string; title: string; side_effect: string }[];
+}
+
+export interface AssistantSettings {
+  enabled: boolean;
+  provider: "anthropic" | "ollama";
+  model: string;
+  egress_mode: EgressMode;
+  monthly_token_budget: number | null;
+  configured: boolean;
+  providers: Record<string, { available: boolean; reason: string | null; models: string[]; external: boolean }>;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  egress_mode: EgressMode;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolCard {
+  kind: string;
+  title: string;
+  data: Record<string, unknown>;
+  link: string | null;
+}
+
+export interface ToolResultView {
+  call_id: string;
+  name: string;
+  ok: boolean;
+  error: string | null;
+  card: ToolCard | null;
+  duration_ms: number;
+}
+
+export type AssistantPart =
+  | { kind: "text"; text: string }
+  | { kind: "tool_call"; id: string; name: string; title: string; args: Record<string, unknown> };
+
+export interface ConversationMessage {
+  id: string;
+  seq: number;
+  role: "user" | "assistant" | "tool";
+  display: {
+    text?: string;
+    parts?: AssistantPart[];
+    notice?: string | null;
+    model?: string;
+    results?: ToolResultView[];
+  };
+  created_at: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ConversationMessage[];
+}
+
+export type StreamEvent =
+  | { event: "start"; data: { conversation_id: string } }
+  | { event: "text"; data: { delta: string } }
+  | { event: "tool_call"; data: { id: string; name: string; title: string; args: Record<string, unknown> } }
+  | { event: "tool_result"; data: ToolResultView }
+  | { event: "notice"; data: { message: string } }
+  | { event: "error"; data: { message: string; code?: string } }
+  | { event: "done"; data: { usage: { input_tokens: number; output_tokens: number }; steps: number } };

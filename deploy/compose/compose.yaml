@@ -5,7 +5,7 @@
 #
 # Network zones (PROJECT_PLAN §4.2): only `edge` publishes a port. Every other
 # network is internal (no route to the internet) except `cloud-egress`, which only
-# the connector worker joins.
+# the connector worker joins, and `llm-egress`, which only the assistant joins.
 
 name: aether
 
@@ -30,6 +30,13 @@ x-backend-env: &backend-env
   AETHER_BAO_ADDR: http://openbao:8200
   AETHER_AWS_PLATFORM_PRINCIPAL_ARN: ${AETHER_AWS_PLATFORM_PRINCIPAL_ARN:-}
   AETHER_OTEL_ENDPOINT: ${AETHER_OTEL_ENDPOINT:-}
+  # Assistant defaults (workspace admins choose within these). The API reads them too,
+  # for the MCP server's data-egress check.
+  AETHER_ASSISTANT_PROVIDER: ${AETHER_ASSISTANT_PROVIDER:-anthropic}
+  AETHER_ASSISTANT_MODEL: ${AETHER_ASSISTANT_MODEL:-claude-opus-5}
+  AETHER_ASSISTANT_DEFAULT_EGRESS: ${AETHER_ASSISTANT_DEFAULT_EGRESS:-external_redacted}
+  AETHER_OLLAMA_URL: ${AETHER_OLLAMA_URL:-}
+  AETHER_OLLAMA_MODEL: ${AETHER_OLLAMA_MODEL:-qwen2.5:7b}
 
 services:
   # ------------------------------------------------------------------ edge
@@ -82,6 +89,26 @@ services:
       migrate: { condition: service_completed_successfully }
       temporal-namespace: { condition: service_completed_successfully }
       openbao: { condition: service_healthy }
+    mem_limit: 512m
+    pids_limit: 200
+
+  assistant:
+    <<: *hardening
+    image: ${AETHER_REGISTRY:-aether}/api:${AETHER_VERSION:-0.1.0}
+    command: ["uvicorn", "aether.assistant.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]
+    environment:
+      <<: *backend-env
+      AETHER_SERVICE_NAME: aether-assistant
+    # anthropic_api_key may be empty: the assistant then reports itself unavailable
+    # (or uses a local model when AETHER_OLLAMA_URL is set).
+    secrets: [pg_app_password, anthropic_api_key]
+    tmpfs: ["/tmp:size=32m"]
+    # The only service with a route to model providers. It holds no secret-store
+    # credentials and cannot reach OpenBao or the cloud connector's network.
+    networks: [app, data, llm-egress]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      temporal-namespace: { condition: service_completed_successfully }
     mem_limit: 512m
     pids_limit: 200
 
@@ -269,6 +296,7 @@ networks:
   data: { internal: true }
   secrets: { internal: true }
   cloud-egress: {}
+  llm-egress: {}
 
 volumes:
   postgres-data:
@@ -288,3 +316,4 @@ secrets:
   bao_api_secret_id: { file: ../secrets/bao_api_secret_id }
   bao_connector_role_id: { file: ../secrets/bao_connector_role_id }
   bao_connector_secret_id: { file: ../secrets/bao_connector_secret_id }
+  anthropic_api_key: { file: ../secrets/anthropic_api_key }

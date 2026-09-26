@@ -66,6 +66,22 @@ echo "Network egress"
 check "api has no internet route"         blocked "$(pyexec api "$EGRESS")"
 check "connector reaches cloud APIs"      open    "$(pyexec worker-connector "$EGRESS")"
 
+# The assistant talks to model providers, so it must hold nothing worth stealing.
+REACH_BAO='
+import socket
+try:
+    socket.create_connection(("openbao", 8200), timeout=3); print("open")
+except Exception: print("blocked")
+'
+HAS_BAO_CREDS='import os; print("yes" if os.path.exists("/run/secrets/bao_role_id") or os.path.exists("/run/secrets/bao_secret_id") else "no")'
+echo "Assistant boundary"
+check "assistant cannot reach OpenBao"        blocked "$(pyexec assistant "$REACH_BAO")"
+check "assistant holds no OpenBao credentials" no     "$(pyexec assistant "$HAS_BAO_CREDS")"
+if "${COMPOSE[@]}" ps --services --status running 2>/dev/null | grep -qx ollama; then
+  check "local model server has no internet route" blocked \
+    "$("${COMPOSE[@]}" exec -T ollama sh -c 'timeout 4 bash -c "</dev/tcp/1.1.1.1/443" 2>/dev/null && echo open || echo blocked' </dev/null 2>/dev/null | tail -1)"
+fi
+
 DB='
 import asyncio
 from sqlalchemy import text

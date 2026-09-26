@@ -36,6 +36,8 @@ for svc in api connector backup; do
     [[ -e "$SECRETS/bao_${svc}_$kind" ]] || : >"$SECRETS/bao_${svc}_$kind"  # placeholder until OpenBao is configured
   done
 done
+# Optional: an Anthropic API key for the assistant. Empty means "not configured".
+[[ -e "$SECRETS/anthropic_api_key" ]] || : >"$SECRETS/anthropic_api_key"
 # Files are bind-mounted into containers running as different non-root users; the
 # 0700 directory is what keeps other host users out.
 chmod 644 "$SECRETS"/*

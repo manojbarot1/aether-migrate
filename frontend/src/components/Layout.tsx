@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Cable, Calculator, ChevronsUpDown, ClipboardCheck, Map as MapIcon, LayoutDashboard, LogOut, Moon, Network, Radar, ScrollText, Search, Server, Sun, Users } from "lucide-react";
+import { Bot, Cable, Calculator, ChevronsUpDown, ClipboardCheck, Map as MapIcon, LayoutDashboard, LogOut, Moon, Network, Radar, ScrollText, Search, Server, Sun, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { useAuth } from "../lib/auth";
@@ -32,6 +32,7 @@ const SECTIONS = [
     title: "Estate",
     items: [
       { to: "", label: "Overview", icon: LayoutDashboard, end: true },
+      { to: "assistant", label: "Assistant", icon: Bot },
       { to: "inventory", label: "Inventory", icon: Server },
       { to: "topology", label: "Topology", icon: Network },
       { to: "compare", label: "Cost comparison", icon: Calculator },
@@ -202,7 +203,7 @@ export function Layout() {
           </div>
         </main>
       </div>
-      <CommandPalette workspaceId={workspaceId} links={links} />
+      <CommandPalette assistant={workspaceId ? `/w/${workspaceId}/assistant` : undefined} workspaceId={workspaceId} links={links} />
     </div>
   );
 }

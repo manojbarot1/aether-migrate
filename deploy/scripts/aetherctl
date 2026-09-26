@@ -19,7 +19,8 @@ usage: aetherctl <command>
   backup [DIR]       consistent backup of Postgres + OpenBao (default ./backups/<timestamp>)
   restore DIR        restore Postgres + OpenBao from a backup directory
   bao-reconfigure    re-apply OpenBao policies/AppRoles (break-glass root token from unseal keys)
-  sync-idp           update the OIDC client's redirect URIs after AETHER_PUBLIC_URL changes
+  ollama-pull MODEL  download a local model for the Ollama overlay (runs a temporary, online pull container)
+  sync-idp           update OIDC clients after AETHER_PUBLIC_URL changes (and add the MCP client)
 USAGE
 }
 
@@ -49,7 +50,28 @@ case "$cmd" in
     kc update "clients/$cid" -r aether \
       -s "redirectUris=[\"$AETHER_PUBLIC_URL/*\"]" -s "webOrigins=[\"$AETHER_PUBLIC_URL\"]" \
       -s "attributes.\"post.logout.redirect.uris\"=$AETHER_PUBLIC_URL/*"
-    log "aether-web client now allows $AETHER_PUBLIC_URL" ;;
+    log "aether-web client now allows $AETHER_PUBLIC_URL"
+    # MCP clients (added after the first release): create the public PKCE client if missing.
+    if [[ -z "$(kc get clients -r aether -q clientId=aether-mcp --fields id --format csv --noquotes)" ]]; then
+      kc create clients -r aether -s clientId=aether-mcp -s publicClient=true -s standardFlowEnabled=true \
+        -s directAccessGrantsEnabled=false -s consentRequired=true \
+        -s 'redirectUris=["http://127.0.0.1/*","http://localhost/*"]' \
+        -s 'attributes."pkce.code.challenge.method"=S256' >/dev/null
+      mid="$(kc get clients -r aether -q clientId=aether-mcp --fields id --format csv --noquotes)"
+      kc create "clients/$mid/protocol-mappers/models" -r aether -s name=aether-api-audience \
+        -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
+        -s 'config."included.custom.audience"=aether-api' -s 'config."access.token.claim"=true' >/dev/null
+      log "created the aether-mcp client for MCP integrations"
+    fi ;;
+  ollama-pull)
+    model="${1:?usage: aetherctl ollama-pull <model>}"
+    image="$(sed -n 's/^ *image: \(ollama\/ollama:.*\)$/\1/p' "$ROOT/deploy/compose/compose.ollama.yaml")"
+    # The runtime container is offline by design; pull through a short-lived one that shares the volume.
+    docker run -d --rm --name aether-ollama-pull -v aether_ollama-models:/root/.ollama "$image" >/dev/null
+    trap 'docker stop aether-ollama-pull >/dev/null 2>&1 || true' EXIT
+    for _ in $(seq 1 30); do docker exec aether-ollama-pull ollama list >/dev/null 2>&1 && break; sleep 1; done
+    docker exec aether-ollama-pull ollama pull "$model"
+    log "pulled $model; set AETHER_OLLAMA_MODEL=$model (or choose it in assistant settings)" ;;
   ""|-h|--help|help) usage ;;
   *) usage; exit 2 ;;
 esac

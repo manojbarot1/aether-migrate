@@ -28,3 +28,20 @@ describe("errorMessage", () => {
     expect(errorMessage(new Error("boom"))).toBe("boom");
   });
 });
+
+describe("readEventStream", () => {
+  it("parses events split across arbitrary chunks and ignores keep-alives", async () => {
+    const { readEventStream } = await import("./api");
+    const raw = 'event: start\ndata: {"conversation_id":"c"}\n\n: keep-alive\n\nevent: text\ndata: {"delta":"Hel"}\n\nevent: text\ndata: {"delta":"lo"}\n\nevent: done\ndata: {"usage":{"input_tokens":1,"output_tokens":2},"steps":1}\n\n';
+    const bytes = new TextEncoder().encode(raw);
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < bytes.length; i += 7) c.enqueue(bytes.slice(i, i + 7));
+        c.close();
+      },
+    });
+    const seen: string[] = [];
+    await readEventStream(body, (e) => seen.push(e.event === "text" ? `text:${e.data.delta}` : e.event));
+    expect(seen).toEqual(["start", "text:Hel", "text:lo", "done"]);
+  });
+});

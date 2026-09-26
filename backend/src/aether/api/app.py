@@ -20,6 +20,7 @@ from aether.logging import configure_logging, get_logger
 from aether.secrets.openbao import OpenBaoClient
 from aether.telemetry import setup_tracing
 from aether.temporal_client import connect as temporal_connect
+from aether.tools.mcp_server import build_mcp
 
 log = get_logger(__name__)
 
@@ -45,7 +46,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.warning("temporal.unavailable", error=type(e).__name__)
             app.state.temporal = None
         log.info("api.started", version=settings.version, env=settings.env)
-        yield
+        async with mcp_server.session_manager.run():
+            yield
         await app.state.verifier.aclose()
         if app.state.bao:
             await app.state.bao.aclose()
@@ -63,6 +65,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.bao = None
     app.state.temporal = None
 
+    install_common(app)
+
+    app.include_router(system.router)
+    app.include_router(workspaces.router)
+    app.include_router(connections.router)
+    app.include_router(inventory.router)
+    app.include_router(compare.router)
+    app.include_router(assessments.router)
+    app.include_router(plans.router)
+    app.include_router(audit.router)
+    # MCP (streamable HTTP at /mcp) is mounted last so it only sees paths the API does not serve.
+    mcp_server, mcp_app = build_mcp(settings, lambda: app.state.verifier, lambda: app.state.temporal)
+    app.mount("/", mcp_app)
+    app.state.mcp_server = mcp_server
+
+    setup_tracing(settings, app)
+    return app
+
+
+def install_common(app: FastAPI) -> None:
+    """Request ids, security headers and the uniform error envelope. Shared by the API
+    and the assistant service so both behave identically at the edge."""
+
     @app.middleware("http")
     async def request_context(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -76,7 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             structlog.contextvars.clear_contextvars()
         response.headers["X-Request-ID"] = rid
-        response.headers["Cache-Control"] = "no-store"
+        response.headers.setdefault("Cache-Control", "no-store")
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
@@ -127,15 +152,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             },
         )
-
-    app.include_router(system.router)
-    app.include_router(workspaces.router)
-    app.include_router(connections.router)
-    app.include_router(inventory.router)
-    app.include_router(compare.router)
-    app.include_router(assessments.router)
-    app.include_router(plans.router)
-    app.include_router(audit.router)
-
-    setup_tracing(settings, app)
-    return app

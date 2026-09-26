@@ -1,11 +1,15 @@
 import type { UserManager } from "oidc-client-ts";
 import type {
   AssessmentRun,
+  AssistantSettings,
+  AssistantStatus,
   AuditPage,
   CatalogStatus,
   CompareResult,
   ClientConfig,
   Connection,
+  Conversation,
+  ConversationDetail,
   InventorySummary,
   Me,
   Member,
@@ -16,6 +20,7 @@ import type {
   ResourcePage,
   Role,
   Snapshot,
+  StreamEvent,
   TopologyView,
   Workspace,
 } from "./types";
@@ -136,6 +141,36 @@ export function createApi(manager: UserManager) {
       URL.revokeObjectURL(url);
     },
 
+    assistantStatus: (wsId: string) => request<AssistantStatus>("GET", `${ws(wsId)}/assistant/status`),
+    assistantSettings: (wsId: string) => request<AssistantSettings>("GET", `${ws(wsId)}/assistant/settings`),
+    saveAssistantSettings: (wsId: string, body: Json) =>
+      request<AssistantSettings>("PUT", `${ws(wsId)}/assistant/settings`, body),
+    conversations: (wsId: string) => request<Conversation[]>("GET", `${ws(wsId)}/assistant/conversations`),
+    createConversation: (wsId: string) => request<Conversation>("POST", `${ws(wsId)}/assistant/conversations`, {}),
+    conversation: (wsId: string, id: string) =>
+      request<ConversationDetail>("GET", `${ws(wsId)}/assistant/conversations/${id}`),
+    deleteConversation: (wsId: string, id: string) =>
+      request<void>("DELETE", `${ws(wsId)}/assistant/conversations/${id}`),
+    /** Send a message and receive the reply as server-sent events. */
+    sendMessage: async (wsId: string, id: string, text: string, onEvent: (e: StreamEvent) => void, signal?: AbortSignal) => {
+      const user = await manager.getUser();
+      const r = await fetch(`${ws(wsId)}/assistant/conversations/${id}/messages`, {
+        method: "POST",
+        headers: {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+          ...(user?.access_token ? { Authorization: `Bearer ${user.access_token}` } : {}),
+        },
+        body: JSON.stringify({ text }),
+        signal,
+      });
+      if (!r.ok || !r.body) {
+        const data = (await r.json().catch(() => ({}))) as { error?: { code: string; message: string; request_id?: string } };
+        throw new ApiError(r.status, data.error?.code ?? "error", data.error?.message ?? `Request failed (${r.status})`, data.error?.request_id ?? null);
+      }
+      await readEventStream(r.body, onEvent);
+    },
+
     audit: (wsId: string, params: { before?: number; action?: string; limit?: number }) => {
       const q = new URLSearchParams();
       if (params.before) q.set("before", String(params.before));
@@ -147,6 +182,30 @@ export function createApi(manager: UserManager) {
 }
 
 export type Api = ReturnType<typeof createApi>;
+
+/** Parse a text/event-stream body (event + data lines, blank-line separated). */
+export async function readEventStream(body: ReadableStream<Uint8Array>, onEvent: (e: StreamEvent) => void): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = "message";
+      const data: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (data.length) onEvent({ event, data: JSON.parse(data.join("\n")) } as StreamEvent);
+    }
+  }
+}
 
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.requestId ? `${e.message} (request ${e.requestId.slice(0, 8)})` : e.message;

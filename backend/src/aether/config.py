@@ -81,6 +81,34 @@ class Settings(BaseSettings):
     )
     default_currency: str = "EUR"
 
+    # Assistant (runs in the separate `assistant` service, the only one with LLM egress).
+    # Platform defaults; workspace admins choose provider/model/egress within these.
+    assistant_provider: Literal["anthropic", "ollama"] = "anthropic"
+    assistant_model: str = "claude-opus-5"
+    assistant_models: list[str] = Field(
+        default_factory=lambda: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+        description="Anthropic models a workspace may select",
+    )
+    assistant_default_egress: Literal["external_allowed", "external_redacted", "local_only"] = (
+        "external_redacted"
+    )
+    assistant_effort: Literal["low", "medium", "high", "xhigh", "max"] | None = "medium"
+    assistant_fallback_models: list[str] = Field(
+        default_factory=lambda: ["claude-opus-5", "claude-fable-5-1", "claude-fable-5"],
+        description="models for which server-side refusal fallbacks are requested",
+    )
+    assistant_max_tokens: int = 16000
+    assistant_max_steps: int = 8
+    assistant_retention_days: int = 30
+    assistant_default_monthly_tokens: int | None = None
+    anthropic_api_key_file: str = "anthropic_api_key"
+    anthropic_base_url: str | None = None
+    ollama_url: str | None = None
+    ollama_model: str = "qwen2.5:7b"
+    # CPU-only hosts can take minutes to process a long prompt before the first token.
+    ollama_timeout_s: float = 900.0
+    ollama_models: list[str] = Field(default_factory=list, description="local models a workspace may select")
+
     # Observability
     otel_endpoint: str | None = Field(
         default=None, description="OTLP gRPC endpoint, e.g. http://otel-collector:4317"

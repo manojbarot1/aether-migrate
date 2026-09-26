@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CornerDownLeft, Search, Server } from "lucide-react";
+import { Bot, CornerDownLeft, Search, Server } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useNavigate } from "react-router";
 import { useApi } from "../lib/context";
@@ -21,7 +21,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 /** ⌘K / Ctrl+K: jump to any page or machine by name or instance id. */
-export function CommandPalette({ workspaceId, links }: { workspaceId?: string; links: PaletteLink[] }) {
+export function CommandPalette({ workspaceId, links, assistant }: { workspaceId?: string; links: PaletteLink[]; assistant?: string }) {
   const api = useApi();
   const navigate = useNavigate();
   const ref = useRef<HTMLDialogElement>(null);
@@ -77,8 +77,13 @@ export function CommandPalette({ workspaceId, links }: { workspaceId?: string; l
       icon: Server,
       group: "Machines",
     }));
-    return [...pages, ...machines] as { key: string; label: string; to: string; icon: PaletteLink["icon"]; group: string; hint?: string }[];
-  }, [links, vms.data, term, workspaceId]);
+    // A question-shaped query can go straight to the assistant.
+    const ask =
+      assistant && term.length >= 3
+        ? [{ key: "ask", label: `Ask the assistant: “${term}”`, to: `${assistant}?q=${encodeURIComponent(term)}`, icon: Bot, group: "Assistant" }]
+        : [];
+    return [...pages, ...machines, ...ask] as { key: string; label: string; to: string; icon: PaletteLink["icon"]; group: string; hint?: string }[];
+  }, [links, vms.data, term, workspaceId, assistant]);
 
   const go = (to: string) => {
     close();

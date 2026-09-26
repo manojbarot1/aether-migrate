@@ -51,6 +51,7 @@ const router = createBrowserRouter([
           { path: "assessment/:runId", lazy: page(() => import("./pages/Assessment"), "Assessment") },
           { path: "plans", lazy: page(() => import("./pages/Plans"), "Plans") },
           { path: "plans/:planId", lazy: page(() => import("./pages/Plans"), "Plans") },
+          { path: "assistant/:conversationId?", lazy: page(() => import("./pages/Assistant"), "Assistant") },
           { path: "discovery", lazy: page(() => import("./pages/Discovery"), "Discovery") },
           { path: "connections", lazy: page(() => import("./pages/Connections"), "Connections") },
           { path: "audit", lazy: page(() => import("./pages/Audit"), "Audit") },

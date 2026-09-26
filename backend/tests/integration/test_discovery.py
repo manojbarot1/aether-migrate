@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -191,7 +192,9 @@ async def test_other_workspace_cannot_see_inventory(
     assert items
 
     other = (
-        await client.post("/api/v1/workspaces", json={"slug": "other-ws-x", "name": "o"}, headers=ADMIN)
+        await client.post(
+            "/api/v1/workspaces", json={"slug": f"other-{uuid.uuid4().hex[:8]}", "name": "o"}, headers=ADMIN
+        )
     ).json()
     member = await make_member(client, other["id"], "admin")
     # Resource ids from workspace A are not visible through workspace B (RLS + explicit check).

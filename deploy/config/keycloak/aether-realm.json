@@ -26,7 +26,14 @@
   "otpPolicyPeriod": 30,
   "eventsEnabled": true,
   "eventsExpiration": 2592000,
-  "enabledEventTypes": ["LOGIN", "LOGIN_ERROR", "LOGOUT", "CODE_TO_TOKEN_ERROR", "UPDATE_PASSWORD", "UPDATE_TOTP"],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "CODE_TO_TOKEN_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_TOTP"
+  ],
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": false,
   "roles": {
@@ -50,11 +57,49 @@
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
       "fullScopeAllowed": true,
-      "redirectUris": ["${AETHER_PUBLIC_URL}/*"],
-      "webOrigins": ["${AETHER_PUBLIC_URL}"],
+      "redirectUris": [
+        "${AETHER_PUBLIC_URL}/*"
+      ],
+      "webOrigins": [
+        "${AETHER_PUBLIC_URL}"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "${AETHER_PUBLIC_URL}/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "aether-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "aether-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "aether-mcp",
+      "name": "AETHER MIGRATE MCP clients (Claude Desktop, Claude Code, IDEs)",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": true,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
         {

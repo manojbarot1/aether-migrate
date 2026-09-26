@@ -100,6 +100,60 @@ Database migrations are forward-only in production. To roll back, restore the pr
 - **Workspace roles** (viewer … admin) are granted in the app under **Members**. The user must have signed in once.
 - Keycloak's admin console (`/auth/admin`) is reachable only from private networks. Its master-realm admin password is in `deploy/secrets/keycloak_admin_password`.
 
+## Assistant
+
+The assistant runs in the `assistant` service. It is the only container with a route to model providers, and it holds no secret-store credentials. See [ADR 0007](../adr/0007-assistant-architecture.md).
+
+**Claude (Anthropic).** Put an API key in `deploy/secrets/anthropic_api_key` (one line, mode 0644, directory 0700) and restart:
+
+```bash
+deploy/scripts/aetherctl up
+```
+
+The default model is `claude-opus-5` (`AETHER_ASSISTANT_MODEL`); workspaces may choose from `AETHER_ASSISTANT_MODELS`. An empty key file means the provider shows as "not configured".
+
+**Local model (Ollama).**
+
+1. Add `deploy/compose/compose.ollama.yaml` to `AETHER_COMPOSE_OVERLAY`.
+2. Pull a model. The runtime container has no internet route; this command uses a short-lived one that does:
+
+   ```bash
+   deploy/scripts/aetherctl ollama-pull qwen2.5:7b
+   ```
+
+3. Set `AETHER_OLLAMA_MODEL` and run `aetherctl up`.
+
+CPU-only hosts process prompts at roughly 5–10 tokens/s, so the first answer can take minutes. Use a GPU host for interactive local use.
+
+**Workspace policy.** Workspace admins open **Assistant → settings** to choose the provider, model, data-egress mode and monthly token budget. The change is audited as `assistant.settings.update`. Conversations keep the egress mode they started with.
+
+| Egress mode | What the model receives |
+|---|---|
+| `external_redacted` (default) | Placeholders instead of IPs, account ids, ARNs, e-mails, host names, resource names and tag values |
+| `local_only` | Real data, local model only |
+| `external_allowed` | Real data, external provider; also enables MCP clients |
+
+**Usage and retention.**
+
+- Model calls are logged in `llm_calls` (model, tokens, latency, tool names), never the prompts.
+- Conversations are private to their author and are purged after 30 days of inactivity (`AETHER_ASSISTANT_RETENTION_DAYS`).
+- Suspected prompt injection found in tool results is removed before the model sees it and audited as `assistant.injection_suspected`.
+
+## MCP server (Claude Desktop, Claude Code, IDEs)
+
+The API serves MCP over streamable HTTP at `${AETHER_PUBLIC_URL}/mcp`. The same tools, RBAC and audit apply as in the product.
+
+- **Egress.** A workspace must use the `external_allowed` egress mode before external clients get data from it.
+- **Authentication.** Clients use OAuth with the platform's Keycloak. The public PKCE client `aether-mcp` allows loopback redirects. On installations that predate it, run `aetherctl sync-idp` to create it.
+- **Discovery.** Protected-resource metadata is at `/.well-known/oauth-protected-resource/mcp`.
+- **Example (Claude Code).**
+
+  ```bash
+  claude mcp add --transport http aether https://aether.example.com/mcp
+  ```
+
+  Call `workspaces_list` first; every other tool takes a `workspace_id`.
+
 ## Logs
 
 ```bash

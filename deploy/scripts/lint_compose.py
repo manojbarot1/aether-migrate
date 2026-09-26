@@ -10,6 +10,10 @@ import sys
 PUBLISHERS = {"edge"}
 # One-shot jobs and third-party images that manage their own writable state.
 WRITABLE_ROOTFS_OK = {"edge", "postgres", "keycloak", "temporal", "temporal-schema", "temporal-namespace"}
+# Networks with a route out of the host, and the only services allowed on each.
+EGRESS = {"cloud-egress": {"worker-connector"}, "llm-egress": {"assistant"}}
+# Services that must never hold secret-store access (they talk to the outside world).
+NO_SECRETS_NETWORK = {"assistant"}
 
 
 def main() -> int:
@@ -43,10 +47,20 @@ def main() -> int:
         long_running = svc.get("restart") not in (None, "no")
         if long_running and not svc.get("mem_limit") and not svc.get("deploy", {}).get("resources"):
             err("long-running services need a memory limit")
+        nets = set(svc.get("networks") or {})
+        for net, allowed in EGRESS.items():
+            if net in nets and name not in allowed:
+                err(f"only {sorted(allowed)} may join the {net} network")
+        if name in NO_SECRETS_NETWORK and "secrets" in nets:
+            err("must not join the secrets network")
         env = svc.get("environment") or {}
         for key, value in env.items():
             if any(s in key.upper() for s in ("PASSWORD", "SECRET", "TOKEN")) and value and not key.endswith("_FILE"):
                 err(f"secret-looking environment variable {key}; use Docker secrets")
+    for net, props in (cfg.get("networks") or {}).items():
+        base = net.removeprefix(f"{cfg.get('name', '')}_")
+        if base not in EGRESS and base != "edge" and not props.get("internal"):
+            errors.append(f"network {base}: must be internal (only {sorted(EGRESS)} and edge may route out)")
     for e in errors:
         print(f"::error::{e}")
     print(f"{len(cfg['services'])} services checked, {len(errors)} violation(s)")
