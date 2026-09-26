@@ -1,318 +1,319 @@
-# AETHER MIGRATE — Base Docker Compose file
-# Use with an override: docker compose -f compose.yaml -f compose.dev.yaml up
-# or:                   docker compose -f compose.yaml -f compose.prod.yaml up
+# AETHER MIGRATE — production Docker Compose stack (single host).
 #
-# Third-party images used here have no Red Hat equivalent.
-# See SECURITY.md §Container Images for the approved exception list.
+#   deploy/scripts/bootstrap.sh     first install (secrets, OpenBao init, admin user)
+#   deploy/scripts/aetherctl up     start / upgrade
+#
+# Network zones (PROJECT_PLAN §4.2): only `edge` publishes a port. Every other
+# network is internal (no route to the internet) except `cloud-egress`, which only
+# the connector worker joins, and `llm-egress`, which only the assistant joins.
 
 name: aether
 
-x-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "50m"
-    max-file: "5"
-
-x-restart: &default-restart
+x-hardening: &hardening
   restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-backend-env: &backend-env
+  AETHER_ENV: ${AETHER_ENV:-prod}
+  AETHER_VERSION: ${AETHER_VERSION:-0.1.0}
+  AETHER_LOG_LEVEL: ${AETHER_LOG_LEVEL:-INFO}
+  AETHER_PUBLIC_URL: ${AETHER_PUBLIC_URL:?set AETHER_PUBLIC_URL in .env}
+  AETHER_OIDC_ISSUER: ${AETHER_PUBLIC_URL}/auth/realms/aether
+  AETHER_OIDC_INTERNAL_BASE: http://keycloak:8080/auth/realms/aether
+  AETHER_TEMPORAL_ADDRESS: temporal:7233
+  AETHER_TEMPORAL_NAMESPACE: aether
+  AETHER_BAO_ADDR: http://openbao:8200
+  AETHER_AWS_PLATFORM_PRINCIPAL_ARN: ${AETHER_AWS_PLATFORM_PRINCIPAL_ARN:-}
+  AETHER_OTEL_ENDPOINT: ${AETHER_OTEL_ENDPOINT:-}
+  # Assistant defaults (workspace admins choose within these). The API reads them too,
+  # for the MCP server's data-egress check.
+  AETHER_ASSISTANT_PROVIDER: ${AETHER_ASSISTANT_PROVIDER:-anthropic}
+  AETHER_ASSISTANT_MODEL: ${AETHER_ASSISTANT_MODEL:-claude-opus-5}
+  AETHER_ASSISTANT_DEFAULT_EGRESS: ${AETHER_ASSISTANT_DEFAULT_EGRESS:-external_redacted}
+  AETHER_OLLAMA_URL: ${AETHER_OLLAMA_URL:-}
+  AETHER_OLLAMA_MODEL: ${AETHER_OLLAMA_MODEL:-qwen2.5:7b}
 
 services:
-
-  # ---------------------------------------------------------------------------
-  # Edge / reverse proxy
-  # NOTE: Caddy 2 has no Red Hat registry equivalent — official image used.
-  # ---------------------------------------------------------------------------
+  # ------------------------------------------------------------------ edge
   edge:
-    image: caddy:2-alpine
-    <<: *default-restart
+    <<: *hardening
+    build: { context: ../.., dockerfile: docker/edge.Dockerfile }
+    image: ${AETHER_REGISTRY:-aether}/edge:${AETHER_VERSION:-0.1.0}
+    read_only: false  # caddy writes certificates to its volumes
+    environment:
+      AETHER_DOMAIN: ${AETHER_DOMAIN:-localhost}
+      AETHER_TLS: ${AETHER_TLS:-internal}
     ports:
-      - "80:80"
-      - "443:443"
+      - "${EDGE_HTTPS_PORT:-443}:8443"
+      - "${EDGE_HTTP_PORT:-80}:8080"
     volumes:
-      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - app
-    logging: *default-logging
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge, app]
     depends_on:
-      - web
-      - api
-      - ai
-      - mcp
+      api: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      web: { condition: service_started }
+    mem_limit: 256m
+    pids_limit: 200
 
-  # ---------------------------------------------------------------------------
-  # Web SPA
-  # ---------------------------------------------------------------------------
   web:
-    build:
-      context: ../
-      dockerfile: docker/web.Dockerfile
-    <<: *default-restart
-    networks:
-      - app
-    logging: *default-logging
+    <<: *hardening
+    build: { context: ../.., dockerfile: docker/web.Dockerfile }
+    image: ${AETHER_REGISTRY:-aether}/web:${AETHER_VERSION:-0.1.0}
+    tmpfs: ["/tmp:size=16m"]
+    networks: [app]
+    mem_limit: 128m
+    pids_limit: 100
 
-  # ---------------------------------------------------------------------------
-  # API
-  # ---------------------------------------------------------------------------
+  # ------------------------------------------------------------------ application
   api:
-    build:
-      context: ../
-      dockerfile: docker/api.Dockerfile
-    <<: *default-restart
+    <<: *hardening
+    build: { context: ../.., dockerfile: docker/backend.Dockerfile, target: api }
+    image: ${AETHER_REGISTRY:-aether}/api:${AETHER_VERSION:-0.1.0}
     environment:
-      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
-      - TEMPORAL_HOST=temporal:7233
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
-      - OIDC_ISSUER=http://keycloak:8080/realms/aether
-      - OIDC_JWKS_URL=http://keycloak:8080/realms/aether/protocol/openid-connect/certs
-      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-aether-api}
-      - OPENBAO_ADDR=http://openbao:8200
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    networks:
-      - app
-      - data
-      - secrets
-    logging: *default-logging
+      <<: *backend-env
+      AETHER_SERVICE_NAME: aether-api
+    secrets:
+      - pg_app_password
+      - { source: bao_api_role_id, target: bao_role_id }
+      - { source: bao_api_secret_id, target: bao_secret_id }
+    tmpfs: ["/tmp:size=32m"]
+    networks: [app, data, secrets]
     depends_on:
-      postgres:
-        condition: service_healthy
-      keycloak:
-        condition: service_started
-      openbao:
-        condition: service_started
+      migrate: { condition: service_completed_successfully }
+      temporal-namespace: { condition: service_completed_successfully }
+      openbao: { condition: service_healthy }
+    mem_limit: 512m
+    pids_limit: 200
 
-  # ---------------------------------------------------------------------------
-  # AI model gateway
-  # ---------------------------------------------------------------------------
-  ai:
-    build:
-      context: ../
-      dockerfile: docker/ai.Dockerfile
-    <<: *default-restart
+  assistant:
+    <<: *hardening
+    image: ${AETHER_REGISTRY:-aether}/api:${AETHER_VERSION:-0.1.0}
+    command: ["uvicorn", "aether.assistant.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    networks:
-      - app
-    logging: *default-logging
-
-  # ---------------------------------------------------------------------------
-  # MCP server
-  # ---------------------------------------------------------------------------
-  mcp:
-    build:
-      context: ../
-      dockerfile: docker/mcp.Dockerfile
-    <<: *default-restart
-    networks:
-      - app
-    logging: *default-logging
-
-  # ---------------------------------------------------------------------------
-  # Domain worker (sizing, cost, assessment, planner)
-  # ---------------------------------------------------------------------------
-  worker_domain:
-    build:
-      context: ../
-      dockerfile: docker/worker.Dockerfile
-    command: ["python3.12", "-m", "worker_domain.main"]
-    <<: *default-restart
-    environment:
-      - TEMPORAL_HOST=temporal:7233
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
-      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
-    networks:
-      - app
-      - data
-    logging: *default-logging
+      <<: *backend-env
+      AETHER_SERVICE_NAME: aether-assistant
+    # anthropic_api_key may be empty: the assistant then reports itself unavailable
+    # (or uses a local model when AETHER_OLLAMA_URL is set).
+    secrets: [pg_app_password, anthropic_api_key]
+    tmpfs: ["/tmp:size=32m"]
+    # The only service with a route to model providers. It holds no secret-store
+    # credentials and cannot reach OpenBao or the cloud connector's network.
+    networks: [app, data, llm-egress]
     depends_on:
-      - temporal
-      - postgres
+      migrate: { condition: service_completed_successfully }
+      temporal-namespace: { condition: service_completed_successfully }
+    mem_limit: 512m
+    pids_limit: 200
 
-  # ---------------------------------------------------------------------------
-  # Connector worker (discovery, provider adapters)
-  # ---------------------------------------------------------------------------
-  worker_connector:
-    build:
-      context: ../
-      dockerfile: docker/worker.Dockerfile
-    command: ["python3.12", "-m", "worker_connector.main"]
-    <<: *default-restart
+  worker-connector:
+    <<: *hardening
+    build: { context: ../.., dockerfile: docker/backend.Dockerfile, target: connector }
+    image: ${AETHER_REGISTRY:-aether}/connector:${AETHER_VERSION:-0.1.0}
     environment:
-      - TEMPORAL_HOST=temporal:7233
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
-      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
-      - OPENBAO_ADDR=http://openbao:8200
-    networks:
-      - app
-      - data
-      - secrets
-    logging: *default-logging
+      <<: *backend-env
+      AETHER_SERVICE_NAME: aether-worker-connector
+    secrets:
+      - pg_app_password
+      - { source: bao_connector_role_id, target: bao_role_id }
+      - { source: bao_connector_secret_id, target: bao_secret_id }
+    tmpfs: ["/tmp:size=32m"]
+    # The only service with a route to the internet (cloud provider APIs).
+    networks: [data, secrets, cloud-egress]
     depends_on:
-      - temporal
-      - postgres
-      - openbao
+      migrate: { condition: service_completed_successfully }
+      temporal-namespace: { condition: service_completed_successfully }
+      openbao: { condition: service_healthy }
+    mem_limit: 768m
+    pids_limit: 300
 
-  # ---------------------------------------------------------------------------
-  # Temporal workflow engine
-  # NOTE: No Red Hat registry equivalent — official temporalio image used.
-  # ---------------------------------------------------------------------------
+  migrate:
+    <<: *hardening
+    image: ${AETHER_REGISTRY:-aether}/api:${AETHER_VERSION:-0.1.0}
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *backend-env
+    secrets: [pg_owner_password]
+    tmpfs: ["/tmp:size=16m"]
+    networks: [data]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ workflow engine
+  temporal-schema:
+    <<: *hardening
+    image: temporalio/admin-tools:1.32.0
+    restart: "no"
+    read_only: false
+    entrypoint: ["/bin/sh", "/scripts/temporal-schema.sh"]
+    secrets: [pg_temporal_password]
+    volumes: ["../scripts/temporal-schema.sh:/scripts/temporal-schema.sh:ro"]
+    networks: [data]
+    depends_on:
+      postgres: { condition: service_healthy }
+
   temporal:
-    image: temporalio/server:latest
-    <<: *default-restart
+    <<: *hardening
+    image: temporalio/server:1.32.0
+    read_only: false
+    entrypoint: ["/bin/sh", "-c", "export POSTGRES_PWD=\"$$(cat /run/secrets/pg_temporal_password)\" && exec /etc/temporal/entrypoint.sh"]
     environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=aether
-      - POSTGRES_PWD=${POSTGRES_PASSWORD}
-      - POSTGRES_SEEDS=postgres
-    networks:
-      - app
-      - data
-    logging: *default-logging
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  temporal-ui:
-    image: temporalio/ui:latest
-    <<: *default-restart
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost
-    networks:
-      - app
-    logging: *default-logging
-    depends_on:
-      - temporal
-
-  # ---------------------------------------------------------------------------
-  # PostgreSQL
-  # NOTE: No Red Hat registry equivalent for Alpine variant — official postgres used.
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:17-alpine
-    <<: *default-restart
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-aether}
-      - POSTGRES_USER=${POSTGRES_USER:-aether}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: temporal
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      BIND_ON_IP: 0.0.0.0
+      NUM_HISTORY_SHARDS: "64"
+      LOG_LEVEL: warn
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/dynamicconfig/aether.yaml
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - data
-    logging: *default-logging
+      - ../config/temporal/dynamicconfig.yaml:/etc/temporal/dynamicconfig/aether.yaml:ro
+    secrets: [pg_temporal_password]
+    networks: [data]
+    depends_on:
+      temporal-schema: { condition: service_completed_successfully }
+    mem_limit: 1g
+    pids_limit: 400
+
+  temporal-namespace:
+    <<: *hardening
+    image: temporalio/admin-tools:1.32.0
+    restart: "no"
+    read_only: false
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do temporal operator cluster health --address temporal:7233 >/dev/null 2>&1 && break; sleep 2; done
+        temporal operator namespace describe -n aether --address temporal:7233 >/dev/null 2>&1 \
+          || temporal operator namespace create -n aether --retention 30d --address temporal:7233
+    networks: [data]
+    depends_on:
+      temporal: { condition: service_started }
+
+  # ------------------------------------------------------------------ data stores
+  postgres:
+    <<: *hardening
+    image: postgres:18.6-trixie
+    user: "999:999"
+    read_only: false
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+    secrets: [pg_superuser_password, pg_owner_password, pg_app_password, pg_temporal_password, pg_keycloak_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ../config/postgres/10-init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    shm_size: 256m
+    networks: [data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aether} -d ${POSTGRES_DB:-aether}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aether"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 2g
+    pids_limit: 500
+
+  openbao:
+    <<: *hardening
+    image: openbao/openbao:2.7.0
+    user: "100:1000"
+    entrypoint: ["bao", "server", "-config=/openbao/config/openbao.hcl"]
+    tmpfs: ["/tmp:size=256m,uid=100,mode=0700"]  # snapshot staging for backup/restore
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    volumes:
+      - ../config/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - openbao-data:/openbao/file
+      - openbao-logs:/openbao/logs
+    networks: [secrets]
+    healthcheck:
+      # Healthy only when initialised AND unsealed (`bao status` exits 2 while sealed).
+      test: ["CMD", "bao", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 1000
+    mem_limit: 256m
+    pids_limit: 200
+
+  keycloak:
+    <<: *hardening
+    image: quay.io/keycloak/keycloak:26.7.4
+    read_only: false
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        export KC_DB_PASSWORD="$$(cat /run/secrets/pg_keycloak_password)"
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
+        exec /opt/keycloak/bin/kc.sh start --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${AETHER_PUBLIC_URL}/auth
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_LOG_CONSOLE_OUTPUT: json
+      AETHER_PUBLIC_URL: ${AETHER_PUBLIC_URL}
+      JAVA_OPTS_KC_HEAP: "-XX:MaxRAMPercentage=70"
+    secrets: [pg_keycloak_password, keycloak_admin_password]
+    volumes:
+      - ../config/keycloak/aether-realm.json:/opt/keycloak/data/import/aether-realm.json:ro
+    networks: [app, data]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
-  # Redis (using Valkey — open-source Redis fork)
-  # NOTE: No Red Hat registry equivalent — official valkey image used.
-  # ---------------------------------------------------------------------------
-  redis:
-    image: valkey/valkey:8.0-alpine
-    <<: *default-restart
-    volumes:
-      - redis_data:/data
-    networks:
-      - data
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
-  # OpenBao (open-source Vault fork)
-  # NOTE: No Red Hat registry equivalent — official openbao image used.
-  # ---------------------------------------------------------------------------
-  openbao:
-    image: openbao/openbao:2.1
-    <<: *default-restart
-    cap_add:
-      - IPC_LOCK
-    environment:
-      - BAO_DEV_ROOT_TOKEN_ID=${OPENBAO_ROOT_TOKEN:-changeme-replace-in-bootstrap}
-      - BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200
-    networks:
-      - secrets
-    logging: *default-logging
-    volumes:
-      - openbao_data:/openbao/data
-
-  # ---------------------------------------------------------------------------
-  # Keycloak (identity provider)
-  # NOTE: No Red Hat registry equivalent for Keycloak distribution — quay.io image used.
-  # ---------------------------------------------------------------------------
-  keycloak:
-    image: quay.io/keycloak/keycloak:latest
-    <<: *default-restart
-    command: ["start-dev", "--import-realm"]
-    environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
-      - KC_DB=postgres
-      - KC_DB_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-aether}
-      - KC_DB_USERNAME=${POSTGRES_USER:-aether}
-      - KC_DB_PASSWORD=${POSTGRES_PASSWORD}
-    volumes:
-      - ./config/keycloak:/opt/keycloak/data/import:ro
-    networks:
-      - app
-      - data
-    logging: *default-logging
+      start_period: 90s
+      retries: 30
     depends_on:
-      postgres:
-        condition: service_healthy
-
-  # ---------------------------------------------------------------------------
-  # Object store (Garage — S3-compatible, self-hosted)
-  # NOTE: No Red Hat registry equivalent — ghcr.io official image used.
-  # ---------------------------------------------------------------------------
-  objstore:
-    image: chrislusf/seaweedfs:latest
-    <<: *default-restart
-    command: server -s3 -s3.port=8333
-    volumes:
-      - objstore_data:/data
-    networks:
-      - data
-    logging: *default-logging
-
-  # ---------------------------------------------------------------------------
-  # DB migration runner (one-shot)
-  # ---------------------------------------------------------------------------
-  migrate:
-    build:
-      context: ../
-      dockerfile: docker/api.Dockerfile
-    command: ["python", "-m", "alembic", "-c", "/opt/packages/db/src/db/migrations/alembic.ini", "upgrade", "head"]
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://aether:${POSTGRES_PASSWORD}@postgres:5432/aether
-    networks:
-      - data
-    depends_on:
-      postgres:
-        condition: service_healthy
-    profiles:
-      - migrate
+      postgres: { condition: service_healthy }
+    mem_limit: 1g
+    pids_limit: 500
 
 networks:
-  app: {}
-  data:
-    internal: true
-  secrets:
-    internal: true
+  edge: {}
+  app: { internal: true }
+  data: { internal: true }
+  secrets: { internal: true }
+  cloud-egress: {}
+  llm-egress: {}
 
 volumes:
-  caddy_data: {}
-  caddy_config: {}
-  postgres_data: {}
-  redis_data: {}
-  openbao_data: {}
-  objstore_data: {}
+  postgres-data:
+  openbao-data:
+  openbao-logs:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  pg_superuser_password: { file: ../secrets/pg_superuser_password }
+  pg_owner_password: { file: ../secrets/pg_owner_password }
+  pg_app_password: { file: ../secrets/pg_app_password }
+  pg_temporal_password: { file: ../secrets/pg_temporal_password }
+  pg_keycloak_password: { file: ../secrets/pg_keycloak_password }
+  keycloak_admin_password: { file: ../secrets/keycloak_admin_password }
+  bao_api_role_id: { file: ../secrets/bao_api_role_id }
+  bao_api_secret_id: { file: ../secrets/bao_api_secret_id }
+  bao_connector_role_id: { file: ../secrets/bao_connector_role_id }
+  bao_connector_secret_id: { file: ../secrets/bao_connector_secret_id }
+  anthropic_api_key: { file: ../secrets/anthropic_api_key }

@@ -1,0 +1,68 @@
+# Shared site configuration, imported by Caddyfile (TLS) and Caddyfile.http (local dev).
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+(aether_routes) {
+	encode zstd gzip
+	import security_headers
+	log {
+		output stdout
+		format json
+	}
+
+	# Identity provider admin surfaces: private networks only.
+	@idp_admin path /auth/admin* /auth/realms/master*
+	handle @idp_admin {
+		@public not remote_ip private_ranges
+		respond @public "Forbidden" 403
+		reverse_proxy keycloak:8080
+	}
+
+	handle /auth/* {
+		reverse_proxy keycloak:8080
+	}
+
+	# Assistant: served by the separate `assistant` service (the only one with LLM egress).
+	# Replies stream as server-sent events, so responses are flushed immediately.
+	@assistant path_regexp ^/api/v1/workspaces/[^/]+/assistant(/.*)?$
+	handle @assistant {
+		reverse_proxy assistant:8000 {
+			header_up X-Request-ID {http.request.uuid}
+			flush_interval -1
+		}
+	}
+
+	# MCP server (streamable HTTP) and its OAuth protected-resource metadata.
+	@mcp path /mcp /mcp/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
+	handle @mcp {
+		reverse_proxy api:8000 {
+			header_up X-Request-ID {http.request.uuid}
+			flush_interval -1
+		}
+	}
+
+	handle /api/* {
+		# Internal-only API docs stay internal.
+		@docs path /api/docs* /api/openapi.json
+		respond @docs 404
+		reverse_proxy api:8000 {
+			header_up X-Request-ID {http.request.uuid}
+		}
+	}
+
+	handle {
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+			X-Frame-Options "DENY"
+		}
+		reverse_proxy web:8080
+	}
+}

@@ -1,0 +1,15 @@
+title = "aether-migrate gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented example credentials and throwaway test fixtures"
+paths = [
+  '''deploy/compose/test-secrets/''',
+  '''backend/tests/''',
+  '''frontend/src/.*\.test\.ts''',
+]
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+]

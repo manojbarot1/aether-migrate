@@ -1,40 +1,38 @@
 #!/usr/bin/env bash
-# AETHER MIGRATE — Backup script
-# Creates a timestamped backup of PostgreSQL data and OpenBao data.
-
+# Consistent online backup: pg_dump (custom format) of every application database plus
+# an OpenBao Raft snapshot (encrypted by OpenBao's barrier; restoring it still needs
+# the unseal keys). Ship the output directory offsite; it contains no plaintext secrets
+# except what the databases hold (no cloud credentials — those live in OpenBao).
 set -euo pipefail
+# shellcheck source=deploy/scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-COMPOSE_BASE="${REPO_ROOT}/deploy/compose/compose.yaml"
-BACKUP_DIR="${REPO_ROOT}/backups"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+OUT="${1:-$ROOT/backups/$(date -u +%Y%m%dT%H%M%SZ)}"
+umask 077
+mkdir -p "$OUT"
+ok=0
+trap '[[ $ok -eq 1 ]] || { warn "backup failed; removing partial $OUT"; rm -rf "$OUT"; }' EXIT
 
-source "${REPO_ROOT}/.env" 2>/dev/null || true
+for db in aether keycloak temporal temporal_visibility; do
+  log "dumping database $db"
+  "${COMPOSE[@]}" exec -T postgres pg_dump -U postgres -d "$db" -Fc --no-owner </dev/null >"$OUT/$db.dump"
+done
+"${COMPOSE[@]}" exec -T postgres pg_dumpall -U postgres --roles-only --no-role-passwords </dev/null >"$OUT/roles.sql"
 
-mkdir -p "$BACKUP_DIR"
+log "taking openbao raft snapshot"
+BAO_TOKEN="$(approle_token backup)"
+export BAO_TOKEN
+"${COMPOSE[@]}" exec -T -e BAO_TOKEN="$BAO_TOKEN" openbao sh -c \
+  'bao operator raft snapshot save /tmp/openbao.snap >/dev/null && cat /tmp/openbao.snap && rm -f /tmp/openbao.snap' \
+  </dev/null >"$OUT/openbao.snap"
+bao token revoke -self >/dev/null 2>&1 || true
+unset BAO_TOKEN
 
-echo "[INFO] Starting backup ${TIMESTAMP}…"
-
-# PostgreSQL dump
-echo "[INFO] Dumping PostgreSQL…"
-docker compose -f "$COMPOSE_BASE" exec -T postgres \
-  pg_dump -U "${POSTGRES_USER:-aether}" -d "${POSTGRES_DB:-aether}" --no-password \
-  | gzip > "${BACKUP_DIR}/postgres_${TIMESTAMP}.sql.gz"
-
-echo "[INFO] PostgreSQL backup saved to: ${BACKUP_DIR}/postgres_${TIMESTAMP}.sql.gz"
-
-# OpenBao snapshot (requires unsealed BAO)
-if [[ -n "${OPENBAO_ROOT_TOKEN:-}" ]]; then
-  echo "[INFO] Snapshotting OpenBao…"
-  docker compose -f "$COMPOSE_BASE" exec -T \
-    -e VAULT_TOKEN="$OPENBAO_ROOT_TOKEN" \
-    openbao bao operator raft snapshot save /tmp/openbao_snapshot_${TIMESTAMP}.snap 2>/dev/null || true
-  docker compose -f "$COMPOSE_BASE" cp \
-    openbao:/tmp/openbao_snapshot_${TIMESTAMP}.snap \
-    "${BACKUP_DIR}/openbao_${TIMESTAMP}.snap" 2>/dev/null || \
-    echo "[WARN] OpenBao snapshot failed — may not be in raft mode."
-fi
-
-echo "[INFO] Backup complete: ${BACKUP_DIR}/"
-echo "[INFO] Files: $(ls -1 ${BACKUP_DIR}/*${TIMESTAMP}* 2>/dev/null | wc -l) file(s)"
+( cd "$OUT" && sha256sum ./*.dump ./*.snap ./roles.sql >SHA256SUMS )
+cat >"$OUT/MANIFEST" <<MANIFEST
+created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+aether_version=${AETHER_VERSION:-unknown}
+host=$(hostname)
+MANIFEST
+ok=1
+log "backup written to $OUT ($(du -sh "$OUT" | cut -f1))"

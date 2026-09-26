@@ -1,0 +1,462 @@
+export type Role = "viewer" | "analyst" | "connection-admin" | "approver" | "operator" | "admin";
+export const ROLES: Role[] = ["viewer", "analyst", "connection-admin", "approver", "operator", "admin"];
+export const roleAtLeast = (role: Role | undefined, min: Role) =>
+  role !== undefined && ROLES.indexOf(role) >= ROLES.indexOf(min);
+
+export interface Workspace {
+  id: string;
+  slug: string;
+  name: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface Me {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  is_platform_admin: boolean;
+  memberships: { workspace: Workspace; role: Role }[];
+}
+
+export interface Member {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  role: Role;
+}
+
+export type ConnectionStatus = "untested" | "ok" | "warning" | "error";
+export type CheckStatus = "pass" | "warn" | "fail" | "skipped";
+
+export interface CheckResult {
+  id: string;
+  status: CheckStatus;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface ConnectionTestResult {
+  status: ConnectionStatus;
+  identity: Record<string, string>;
+  checks: CheckResult[];
+  cloud_calls: string[];
+  tested_at: string;
+}
+
+export interface Connection {
+  id: string;
+  workspace_id: string;
+  name: string;
+  provider: "aws" | "azure" | "gcp" | "ibm";
+  mode: "read_only" | "execute";
+  auth_method: "aws_assume_role" | "aws_access_key";
+  config: { role_arn?: string; external_id?: string; regions?: string[]; home_region?: string };
+  has_secret: boolean;
+  secret_version: number | null;
+  status: ConnectionStatus;
+  last_tested_at: string | null;
+  last_test_result: ConnectionTestResult | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyTemplate {
+  provider: string;
+  auth_method: string;
+  external_id: string | null;
+  trust_policy: Record<string, unknown> | null;
+  permissions_policy: Record<string, unknown>;
+  instructions: string[];
+}
+
+export interface AuditEvent {
+  seq: number;
+  id: string;
+  occurred_at: string;
+  actor_type: string;
+  actor_id: string | null;
+  actor_display: string | null;
+  workspace_id: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  connection_id: string | null;
+  status: "success" | "denied" | "failure";
+  details: Record<string, unknown>;
+  request_id: string | null;
+  hash: string;
+}
+
+export interface AuditPage {
+  items: AuditEvent[];
+  next_before: number | null;
+}
+
+export interface ClientConfig {
+  oidc_authority: string;
+  oidc_client_id: string;
+  version: string;
+  env: string;
+}
+
+export interface CoverageEntry {
+  region: string;
+  kind: string;
+  status: "ok" | "denied" | "disabled" | "throttled_partial" | "error";
+  detail?: string | null;
+}
+
+export interface Snapshot {
+  id: string;
+  connection_id: string;
+  provider: string;
+  status: "running" | "complete" | "partial" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  regions: string[] | null;
+  coverage: CoverageEntry[] | null;
+  stats: { resources?: Record<string, number>; regions?: number; cloud_calls?: number } | null;
+  error: string | null;
+}
+
+export interface ResourceSummary {
+  id: string;
+  type: string;
+  native_id: string;
+  name: string | null;
+  provider: string;
+  account: string;
+  region: string;
+  zone: string | null;
+  status: string | null;
+  tags: Record<string, string>;
+  vcpu: number | null;
+  memory_mib: number | null;
+  cpu_arch: string | null;
+  os_family: string | null;
+  source_sku: string | null;
+  snapshot_id: string;
+  connection_id: string;
+  discovered_at: string;
+}
+
+export interface ResourcePage {
+  items: ResourceSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ResourceDetail extends ResourceSummary {
+  spec: Record<string, unknown>;
+  raw: Record<string, unknown>;
+  created_at_source: string | null;
+  neighbours: { direction: "in" | "out"; kind: string; resource: ResourceSummary }[];
+  snapshot: Snapshot;
+}
+
+export interface Breakdown {
+  key: string;
+  count: number;
+}
+
+export interface InventorySummary {
+  vms_by_os: Breakdown[];
+  vms_by_arch: Breakdown[];
+  vms_by_status: Breakdown[];
+  resources_by_type: Record<string, number>;
+  vms_by_region: { region: string; count: number }[];
+  total_vcpu: number;
+  total_memory_mib: number;
+}
+
+export interface TopologyNode {
+  id: string;
+  type: "network" | "subnet" | "vm" | "load_balancer" | "security_group";
+  native_id: string;
+  name: string | null;
+  parent: string | null;
+  status: string | null;
+  detail: string | null;
+}
+
+export interface TopologyView {
+  network: TopologyNode;
+  nodes: TopologyNode[];
+  edges: { from: string; to: string; kind: "routes_to" | "protected_by" | "references" }[];
+  truncated: boolean;
+  mermaid: string;
+}
+
+export type PriceScenario = "on_demand" | "reserved_1y" | "reserved_3y";
+export type Money = Partial<Record<PriceScenario, number | null>>;
+
+export interface SizedCandidate {
+  sku: string;
+  family: string;
+  vcpu: number;
+  memory_mib: number;
+  cpu_arch: string;
+  local_disk_gib: number;
+  hourly_usd: number;
+  spec_source: string;
+  reasons: string[];
+}
+
+export interface SideCost {
+  sku: string | null;
+  os: string;
+  compute_monthly_usd: Money;
+  disks: { device: string | null; size_gib: number | null; mapped_to: string | null; monthly_usd: number | null; note: string | null }[];
+  disks_monthly_usd: number | null;
+  total_monthly_usd: Money;
+}
+
+export interface CompareItem {
+  resource_id: string;
+  name: string | null;
+  native_id: string;
+  region: string;
+  source_sku: string | null;
+  sizing: {
+    strategy: string;
+    requirement: { vcpu: number; memory_mib: number; cpu_arch: string; basis: string; notes: string[] };
+    candidates: SizedCandidate[];
+    warnings: string[];
+  };
+  cost: {
+    source: SideCost;
+    target: SideCost;
+    one_time: { egress_gib: number; egress_usd: number; dual_running_usd: number | null };
+    assumptions: string[];
+  } | null;
+}
+
+export interface CompareResult {
+  target_provider: string;
+  target_region: string;
+  strategy: string;
+  currency: string;
+  fx_per_usd: number;
+  fx_date: string | null;
+  target_prices_as_of: string | null;
+  target_price_stale: boolean;
+  source_prices_available: boolean;
+  items: CompareItem[];
+  totals: {
+    source_monthly_usd: Money;
+    target_monthly_usd: Money;
+    one_time_usd: number | null;
+    unsized: number;
+  };
+}
+
+export interface CatalogStatus {
+  azure: { region: string; prices: number; oldest_price_at: string }[];
+  aws: { region: string; prices: number; oldest_price_at: string }[];
+  syncs: { id: string; provider: string; status: string; started_at: string; finished_at: string | null }[];
+}
+
+export type Severity = "blocker" | "warning" | "info";
+export type ReadinessState = "ready" | "ready_with_changes" | "blocked";
+
+export interface Finding {
+  rule_id: string;
+  rule_version: number;
+  severity: Severity;
+  category: string;
+  title: string;
+  message: string;
+  evidence: Record<string, unknown>;
+  remediation: string;
+  acknowledged: boolean;
+  acknowledgement: { reason: string; by: string | null; at: string } | null;
+}
+
+export interface AssessedVm {
+  resource_id: string;
+  native_id: string;
+  name: string | null;
+  readiness: ReadinessState;
+  score: number;
+  findings: Finding[];
+  target_sku: string | null;
+  target_family: string | null;
+}
+
+export interface AssessmentRun {
+  id: string;
+  created_at: string;
+  target_provider: string;
+  target_region: string;
+  strategy: string;
+  ruleset_version: string;
+  summary: {
+    vms: number;
+    readiness: Record<ReadinessState, number>;
+    average_score: number;
+    top_issues: [string, number][];
+    quota_needs: { family: string; vcpu: number }[];
+  };
+  items: AssessedVm[] | null;
+}
+
+export interface PlanStep {
+  id: string;
+  title: string;
+  pre_check: string;
+  action: string;
+  post_check: string;
+  compensation: string;
+  automated: boolean;
+}
+
+export interface PlanWave {
+  number: number;
+  name: string;
+  vms: string[];
+  reason: string;
+  data_gib: number;
+  initial_sync_hours: number;
+  cutover_downtime_minutes: number;
+  steps: PlanStep[];
+}
+
+export interface PlanScopeVm {
+  resource_id: string;
+  native_id: string;
+  name: string | null;
+  source_sku: string | null;
+  os: string | null;
+  target_sku: string | null;
+  disks_gib: number;
+  readiness: string;
+  load_balancers: string[];
+  open_findings: { rule_id: string; severity: string; title: string }[];
+  monthly_usd: Money;
+}
+
+export interface PlanTotals {
+  vms: number;
+  waves: number;
+  data_gib: number;
+  target_monthly_usd: Money;
+  one_time_usd: number;
+  open_blockers: string[];
+  open_warnings: number;
+}
+
+export interface PlanSummary {
+  id: string;
+  lineage_id: string;
+  version: number;
+  name: string;
+  status: "draft" | "in_review" | "approved" | "rejected" | "superseded";
+  content_hash: string;
+  created_by_display: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  decided_at: string | null;
+  totals: PlanTotals;
+}
+
+export interface PlanDetail extends PlanSummary {
+  content: {
+    planner_version: string;
+    target: { provider: string; region: string; strategy: string };
+    options: { mechanism: string; replication_bandwidth_mbps: number; cutover_window: string; resource_group: string };
+    scope: PlanScopeVm[];
+    excluded: { native_id: string; name: string | null; reason: string }[];
+    prerequisites: { id: string; title: string; detail: string; evidence: Record<string, unknown> }[];
+    waves: PlanWave[];
+    rollback: string[];
+    assumptions: string[];
+    inputs: Record<string, unknown>;
+  };
+  iac_files: string[];
+  iac_notes: string[];
+  reviews: { reviewer_display: string | null; decision: string; comment: string; content_hash: string; created_at: string; expires_at: string | null }[];
+  versions: { id: string; version: number; status: string; created_at: string }[];
+}
+
+// ---------------------------------------------------------------------------- assistant
+
+export type EgressMode = "external_allowed" | "external_redacted" | "local_only";
+
+export interface AssistantStatus {
+  available: boolean;
+  reason: string | null;
+  provider: string;
+  model: string;
+  egress_mode: EgressMode;
+  external: boolean;
+  tokens_this_month: number;
+  monthly_token_budget: number | null;
+  tools: { name: string; title: string; side_effect: string }[];
+}
+
+export interface AssistantSettings {
+  enabled: boolean;
+  provider: "anthropic" | "ollama";
+  model: string;
+  egress_mode: EgressMode;
+  monthly_token_budget: number | null;
+  configured: boolean;
+  providers: Record<string, { available: boolean; reason: string | null; models: string[]; external: boolean }>;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  egress_mode: EgressMode;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolCard {
+  kind: string;
+  title: string;
+  data: Record<string, unknown>;
+  link: string | null;
+}
+
+export interface ToolResultView {
+  call_id: string;
+  name: string;
+  ok: boolean;
+  error: string | null;
+  card: ToolCard | null;
+  duration_ms: number;
+}
+
+export type AssistantPart =
+  | { kind: "text"; text: string }
+  | { kind: "tool_call"; id: string; name: string; title: string; args: Record<string, unknown> };
+
+export interface ConversationMessage {
+  id: string;
+  seq: number;
+  role: "user" | "assistant" | "tool";
+  display: {
+    text?: string;
+    parts?: AssistantPart[];
+    notice?: string | null;
+    model?: string;
+    results?: ToolResultView[];
+  };
+  created_at: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ConversationMessage[];
+}
+
+export type StreamEvent =
+  | { event: "start"; data: { conversation_id: string } }
+  | { event: "text"; data: { delta: string } }
+  | { event: "tool_call"; data: { id: string; name: string; title: string; args: Record<string, unknown> } }
+  | { event: "tool_result"; data: ToolResultView }
+  | { event: "notice"; data: { message: string } }
+  | { event: "error"; data: { message: string; code?: string } }
+  | { event: "done"; data: { usage: { input_tokens: number; output_tokens: number }; steps: number } };

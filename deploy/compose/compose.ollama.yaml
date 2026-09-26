@@ -1,0 +1,35 @@
+# Local model overlay for `local_only` workspaces (nothing leaves the deployment).
+#
+#   AETHER_COMPOSE_OVERLAY="... deploy/compose/compose.ollama.yaml"
+#   deploy/scripts/aetherctl ollama-pull qwen2.5:7b     # models are pulled out of band
+#
+# The runtime Ollama container sits on an internal network with no route to the
+# internet; only the assistant can reach it.
+services:
+  ollama:
+    image: ollama/ollama:0.34.4
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_CONTEXT_LENGTH: "16384"
+    tmpfs: ["/tmp:size=512m"]
+    volumes: ["ollama-models:/root/.ollama"]
+    networks: [llm]
+    mem_limit: ${OLLAMA_MEM_LIMIT:-8g}
+    pids_limit: 400
+
+  assistant:
+    environment:
+      AETHER_OLLAMA_URL: http://ollama:11434
+      AETHER_OLLAMA_MODEL: ${AETHER_OLLAMA_MODEL:-qwen2.5:7b}
+    networks: [app, data, llm-egress, llm]
+
+networks:
+  llm: { internal: true }
+
+volumes:
+  ollama-models:

@@ -1,246 +1,121 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: [main, develop]
-  pull_request:
     branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-
-  # ---------------------------------------------------------------------------
-  # Job 1: Lint
-  # ---------------------------------------------------------------------------
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  backend:
+    name: backend (lint, types, tests on Postgres)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.5.26"
-
-      - name: Install dev dependencies
-        run: uv sync --frozen
-
-      - name: ruff check
-        run: uv run ruff check .
-
-      - name: ruff format check
-        run: uv run ruff format --check .
-
-      - name: mypy typecheck
-        run: uv run mypy packages/core packages/audit packages/db apps/api --strict
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
-
-      - name: Install web dependencies
-        run: cd apps/web && npm ci
-
-      - name: ESLint
-        run: cd apps/web && npm run lint
-
-      - name: TypeScript check
-        run: cd apps/web && npm run typecheck
-
-  # ---------------------------------------------------------------------------
-  # Job 2: Test
-  # ---------------------------------------------------------------------------
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: aether_test
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: aether_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    env:
-      DATABASE_URL: postgresql+asyncpg://aether_test:test_password@localhost:5432/aether_test
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.5.26"
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run pytest
-        run: uv run pytest tests/ -v --cov=packages --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build test image
+        run: docker compose -f deploy/compose/compose.test.yaml build tests
+      - name: Lint and type-check
+        run: >
+          docker compose -f deploy/compose/compose.test.yaml run --rm --no-deps
+          -e RUFF_CACHE_DIR=/tmp/rc -e MYPY_CACHE_DIR=/tmp/mc tests
+          sh -c "ruff check src tests && ruff format --check src tests && lint-imports && mypy src"
+      - name: Tests (unit + integration against PostgreSQL 18)
+        run: docker compose -f deploy/compose/compose.test.yaml run --rm tests
+      - name: Tear down
         if: always()
-        with:
-          name: coverage-report
-          path: coverage.xml
+        run: docker compose -f deploy/compose/compose.test.yaml down -v
 
-  # ---------------------------------------------------------------------------
-  # Job 3: Build Docker images
-  # ---------------------------------------------------------------------------
-  build:
-    name: Build Docker Images
-    runs-on: ubuntu-latest
-    needs: [lint]
+  frontend:
+    name: frontend (lint, types, tests, build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build API image
-        uses: docker/build-push-action@v6
+      - uses: actions/setup-node@v4
         with:
-          context: .
-          file: docker/api.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-          tags: aether-migrate/api:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
 
-      - name: Build AI image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/ai.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-          tags: aether-migrate/ai:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build Worker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/worker.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-          tags: aether-migrate/worker:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build Web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/web.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-          tags: aether-migrate/web:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ---------------------------------------------------------------------------
-  # Job 4: Security scan
-  # ---------------------------------------------------------------------------
-  scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: [build]
+  deploy-config:
+    name: deploy config (compose hardening, shellcheck)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.5.26"
-
-      - name: pip-audit (Python dependency scan)
+      - name: Placeholder secrets and env for config resolution
         run: |
-          uv pip install pip-audit
-          uv run pip-audit --desc on
+          cp .env.example .env
+          for f in pg_superuser_password pg_owner_password pg_app_password pg_temporal_password \
+                   pg_keycloak_password keycloak_admin_password bao_api_role_id bao_api_secret_id \
+                   bao_connector_role_id bao_connector_secret_id anthropic_api_key; do echo x > deploy/secrets/$f; done
+      - name: Compose hardening baseline
+        run: >
+          docker compose --project-directory deploy/compose -f deploy/compose/compose.yaml --env-file .env
+          config --format json | python3 deploy/scripts/lint_compose.py
+      - name: Overlays resolve (dev, demo, local model)
+        run: >
+          docker compose --project-directory deploy/compose -f deploy/compose/compose.yaml
+          -f deploy/compose/compose.dev.yaml -f deploy/compose/compose.demo.yaml -f deploy/compose/compose.ollama.yaml
+          --env-file .env config --quiet
+      - name: shellcheck
+        run: >
+          docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x
+          deploy/scripts/*.sh deploy/scripts/aetherctl deploy/config/postgres/10-init-roles.sh
 
-      - name: npm audit (web dependencies)
-        run: cd apps/web && npm audit --audit-level=high
-
-      - name: Build API image for Trivy scan
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/api.Dockerfile
-          push: false
-          load: true
-          tags: aether-migrate/api:scan
-
-      - name: Trivy scan — API image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: aether-migrate/api:scan
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-
-  # ---------------------------------------------------------------------------
-  # Job 5: SBOM generation (main branch only)
-  # ---------------------------------------------------------------------------
-  sbom:
-    name: Generate SBOM
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: github.ref == 'refs/heads/main'
+  secrets-scan:
+    name: secret scanning
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build API image for SBOM
-        uses: docker/build-push-action@v6
+  images:
+    name: images (build + vulnerability scan)
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend, deploy-config]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, dockerfile: docker/backend.Dockerfile, target: api }
+          - { name: connector, dockerfile: docker/backend.Dockerfile, target: connector }
+          - { name: web, dockerfile: docker/web.Dockerfile, target: web }
+          - { name: edge, dockerfile: docker/edge.Dockerfile, target: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/api.Dockerfile
-          push: false
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           load: true
-          tags: aether-migrate/api:sbom
-
-      - name: Generate SBOM with Syft
-        uses: anchore/sbom-action@v0
+          tags: aether/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Trivy (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
-          image: aether-migrate/api:sbom
-          format: spdx-json
-          output-file: sbom-api.spdx.json
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-api
-          path: sbom-api.spdx.json
+          image-ref: aether/${{ matrix.name }}:ci
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
