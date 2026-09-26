@@ -61,6 +61,8 @@ ignore = ["S101", "S105", "S106", "RUF012"]
 "src/aether/db/migrations/**" = ["E501"]
 # Rule messages and remediations are user-facing prose; wrapping them hurts readability.
 "src/aether/assessment/engine.py" = ["E501"]
+"src/aether/planner/engine.py" = ["E501"]
+"src/aether/iac/azure.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.13"

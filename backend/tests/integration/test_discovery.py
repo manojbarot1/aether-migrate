@@ -446,3 +446,163 @@ async def test_assessment_run_and_acknowledgement(
         await client.get(f"/api/v1/workspaces/{ws}/audit", params={"action": "assessment."}, headers=ADMIN)
     ).json()["items"]
     assert {e["action"] for e in audit} >= {"assessment.run", "assessment.acknowledge"}
+
+
+async def test_plan_lifecycle_four_eyes_immutability_and_exports(
+    app: FastAPI,
+    client: httpx.AsyncClient,
+    workspace: dict[str, Any],
+    bao: FakeBao,
+    aws: dict[str, Any],
+    owner_engine: Any,
+) -> None:
+    import io
+    import zipfile
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from aether.catalog.azure import curated_specs
+    from aether.catalog.store import upsert_prices, upsert_specs
+    from aether.core.catalog import Price, PriceModel
+    from aether.db.session import session_scope
+
+    from .conftest import ADMIN
+
+    async with session_scope() as s:
+        await upsert_specs(s, curated_specs())
+        await upsert_prices(
+            s,
+            [
+                Price(
+                    provider="azure",
+                    region="uksouth",
+                    sku=sku,
+                    os="linux",
+                    model=PriceModel.ON_DEMAND,
+                    hourly_usd=h,
+                    source="test",
+                )
+                for sku, h in (("Standard_E8s_v5", 0.5), ("Standard_F2s_v2", 0.09))
+            ],
+            None,
+        )
+    app.state.temporal = _InlineDiscovery(ConnectorActivities(bao))
+    ws = workspace["id"]
+    author = await make_member(client, ws, "analyst")
+    approver = await make_member(client, ws, "approver")
+    conn = (
+        await client.post(
+            f"/api/v1/workspaces/{ws}/connections",
+            json={
+                "name": "plan",
+                "provider": "aws",
+                "config": {"auth_method": "aws_access_key", "regions": [REGION], "home_region": REGION},
+                "secret": {
+                    "access_key_id": aws["key"]["AccessKeyId"],
+                    "secret_access_key": aws["key"]["SecretAccessKey"],
+                },
+            },
+            headers=ADMIN,
+        )
+    ).json()
+    await client.post(f"/api/v1/workspaces/{ws}/connections/{conn['id']}/discover", headers=ADMIN)
+    vms = (await client.get(f"/api/v1/workspaces/{ws}/inventory/resources", headers=author)).json()["items"]
+    run = (
+        await client.post(
+            f"/api/v1/workspaces/{ws}/assessments",
+            json={"resource_ids": [v["id"] for v in vms], "target_region": "uksouth"},
+            headers=author,
+        )
+    ).json()
+
+    r = await client.post(
+        f"/api/v1/workspaces/{ws}/plans",
+        json={"name": "Pilot wave", "assessment_run_id": run["id"]},
+        headers=author,
+    )
+    assert r.status_code == 201, r.text
+    plan = r.json()
+    assert (plan["status"], plan["version"]) == ("draft", 1)
+    assert len(plan["content_hash"]) == 64
+    assert plan["totals"]["vms"] == 4
+    assert {"main.tf", "outputs.tf", "versions.tf", "variables.tf"} <= set(plan["iac_files"])
+    steps = plan["content"]["waves"][0]["steps"]
+    assert all(s["pre_check"] and s["post_check"] and s["compensation"] for s in steps)
+
+    base = f"/api/v1/workspaces/{ws}/plans/{plan['id']}"
+    # Analysts lack the approver role; drafts cannot be reviewed.
+    denied = await client.post(
+        f"{base}/review",
+        json={"decision": "approve", "comment": "ok", "content_hash": plan["content_hash"]},
+        headers=author,
+    )
+    assert denied.status_code == 403
+    assert (await client.post(f"{base}/submit", headers=author)).status_code == 200
+    assert (await client.post(f"{base}/submit", headers=author)).status_code == 409  # no longer a draft
+
+    # Four-eyes: an author who is also an approver still cannot review their own plan.
+    own_plan = (
+        await client.post(
+            f"/api/v1/workspaces/{ws}/plans",
+            json={"name": "Admin plan", "assessment_run_id": run["id"]},
+            headers=ADMIN,
+        )
+    ).json()
+    await client.post(f"/api/v1/workspaces/{ws}/plans/{own_plan['id']}/submit", headers=ADMIN)
+    own = await client.post(
+        f"/api/v1/workspaces/{ws}/plans/{own_plan['id']}/review",
+        json={"decision": "approve", "comment": "self", "content_hash": own_plan["content_hash"]},
+        headers=ADMIN,
+    )
+    assert own.status_code == 403
+    assert "own plan" in own.json()["error"]["message"]
+
+    stale = await client.post(
+        f"{base}/review",
+        json={"decision": "approve", "comment": "looks fine", "content_hash": "0" * 64},
+        headers=approver,
+    )
+    assert stale.status_code == 409
+    approved = await client.post(
+        f"{base}/review",
+        json={"decision": "approve", "comment": "Reviewed waves", "content_hash": plan["content_hash"]},
+        headers=approver,
+    )
+    assert approved.status_code == 200, approved.text
+    body = approved.json()
+    assert body["status"] == "approved"
+    assert body["reviews"][0]["content_hash"] == plan["content_hash"]
+    assert body["reviews"][0]["expires_at"]
+
+    # Content is immutable even for the schema owner.
+    with pytest.raises(DBAPIError, match="immutable"):
+        async with owner_engine.begin() as c:
+            await c.execute(text("UPDATE plans SET content = '{}'::jsonb WHERE id = :i"), {"i": plan["id"]})
+
+    # Revising creates v2 and supersedes v1; the diff reports changes.
+    rev = await client.post(
+        f"{base}/revise", json={"options": {"replication_bandwidth_mbps": 100}}, headers=author
+    )
+    assert rev.status_code == 201, rev.text
+    v2 = rev.json()
+    assert (v2["version"], v2["status"]) == (2, "draft")
+    assert v2["content_hash"] != plan["content_hash"]
+    assert [v["status"] for v in v2["versions"]] == ["superseded", "draft"]
+    d = (
+        await client.get(f"/api/v1/workspaces/{ws}/plans/{v2['id']}/diff/{plan['id']}", headers=author)
+    ).json()
+    assert d["added"] == []
+    assert d["removed"] == []
+
+    md = await client.get(f"{base}/export/markdown", headers=author)
+    assert md.headers["content-type"].startswith("text/markdown")
+    assert md.text.startswith("# Migration plan: Pilot wave")
+    js = (await client.get(f"{base}/export/json", headers=author)).json()
+    assert js["content_hash"] == plan["content_hash"]
+    z = await client.get(f"{base}/export/opentofu", headers=author)
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert any(n.endswith("/main.tf") for n in names)
+    assert any(n.endswith("/PLAN_HASH") for n in names)
+    tf = (await client.get(f"{base}/iac/main.tf", headers=author)).text
+    assert 'resource "azurerm_virtual_network"' in tf

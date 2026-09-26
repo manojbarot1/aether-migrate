@@ -289,3 +289,50 @@ class FindingAcknowledgement(Base):
     acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     acknowledged_by_display: Mapped[str | None] = mapped_column(String(320))
     acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# --------------------------------------------------------------------------- plans
+
+
+class Plan(Base):
+    """A versioned, content-hashed migration plan. Content is immutable (DB trigger);
+    revisions are new rows sharing ``lineage_id``."""
+
+    __tablename__ = "plans"
+    __table_args__ = (
+        UniqueConstraint("lineage_id", "version"),
+        Index("ix_plans_ws_created", "workspace_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="RESTRICT"))
+    lineage_id: Mapped[uuid.UUID] = mapped_column()
+    version: Mapped[int] = mapped_column()
+    name: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(16))  # draft | in_review | approved | rejected | superseded
+    content: Mapped[dict[str, Any]] = mapped_column()
+    content_hash: Mapped[str] = mapped_column(String(64))
+    iac: Mapped[dict[str, Any]] = mapped_column()
+    assessment_run_id: Mapped[uuid.UUID | None] = mapped_column()
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_by_display: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlanReview(Base):
+    """An approval or rejection, bound to the exact content hash that was reviewed."""
+
+    __tablename__ = "plan_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plans.id", ondelete="CASCADE"))
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="RESTRICT"))
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewer_display: Mapped[str | None] = mapped_column(String(320))
+    decision: Mapped[str] = mapped_column(String(16))  # approve | reject
+    comment: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
